@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { locateStore, storeDirFor, MemoryStore, readMeta } from '@memory-layer/core';
@@ -66,6 +67,74 @@ export function storeDirOrThrow(from: string = process.cwd()): string {
   const dir = locateStore(from);
   if (!dir) throw new Error(`No memory store found at or above ${from}. Run \`memory init\` first.`);
   return dir;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * The async twin of `git`, for checking many repositories at once.
+ *
+ * Each check spawns a process, so doing them one after another costs the sum of
+ * all of them: a registry with a couple of hundred projects turns a listing into
+ * a minute of waiting. Parallel with a cap keeps it flat without forking the
+ * whole registry at once.
+ */
+async function gitAsync(args: string[], cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', args, { cwd, encoding: 'utf8' });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+export interface Staleness {
+  stale: boolean;
+  indexed: string | null;
+  head: string | null;
+  /** Set when the check could not run at all -- a moved or deleted repository. */
+  unavailable?: string;
+}
+
+/** Staleness for one store, never throwing: a broken entry must not sink a listing. */
+export async function isStaleAsync(storeDir: string): Promise<Staleness> {
+  try {
+    const meta = readMeta(storeDir);
+    if (!fs.existsSync(meta.projectRoot)) {
+      return { stale: false, indexed: meta.lastCommit ?? null, head: null, unavailable: 'project directory is gone' };
+    }
+    const head = await gitAsync(['rev-parse', 'HEAD'], meta.projectRoot);
+    if (!head) {
+      return { stale: false, indexed: meta.lastCommit ?? null, head: null, unavailable: 'not a git repository any more' };
+    }
+    return { stale: Boolean(meta.lastCommit && head !== meta.lastCommit), indexed: meta.lastCommit ?? null, head };
+  } catch (err) {
+    return {
+      stale: false, indexed: null, head: null,
+      unavailable: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** Runs `worker` over `items` with at most `limit` in flight. */
+export async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]!);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }
 
 /** True when the store was built against a commit that is no longer HEAD. */

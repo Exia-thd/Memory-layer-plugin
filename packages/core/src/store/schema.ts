@@ -4,7 +4,7 @@ import { EDGE_TYPES } from '../types.js';
  * Bumped whenever the DDL below changes shape. `doctor` compares it against the
  * value recorded in meta.json and refuses to guess.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Vector width is a schema decision, not a runtime setting: it is baked into the
@@ -62,6 +62,30 @@ export function ddl(dimensions: number): string[] {
         PRIMARY KEY(id)
      )`,
   ];
+
+  // The keyword index lives in the same store as the nodes it describes, so it
+  // cannot drift out of step with them and there is nothing to rebuild on start.
+  // Postings are held per term rather than per (term, node) pair: a query reads
+  // one row per query term instead of scanning millions of pairs.
+  statements.push(
+    `CREATE NODE TABLE IF NOT EXISTS Bm25Term(
+        term STRING,
+        postings STRING,
+        df INT64,
+        PRIMARY KEY(term)
+     )`,
+    `CREATE NODE TABLE IF NOT EXISTS Bm25Doc(
+        node_id STRING,
+        length INT64,
+        PRIMARY KEY(node_id)
+     )`,
+    `CREATE NODE TABLE IF NOT EXISTS Bm25Stat(
+        id STRING,
+        doc_count INT64,
+        total_length INT64,
+        PRIMARY KEY(id)
+     )`,
+  );
 
   for (const type of EDGE_TYPES) {
     statements.push(

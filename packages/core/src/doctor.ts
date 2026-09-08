@@ -113,6 +113,22 @@ export async function doctor(
       });
     }
 
+    // An index holding fewer documents than the store holds nodes is pure silent
+    // recall loss: the keyword branch answers, just not about everything.
+    const index = await store.indexStats();
+    const behind = stats.nodes - index.docCount;
+    checks.push({
+      name: 'keyword index',
+      status: index.docCount === 0 && stats.nodes > 0 ? 'fail' : behind > 0 ? 'warn' : 'ok',
+      detail:
+        index.docCount === 0 && stats.nodes > 0
+          ? `no postings for ${stats.nodes} nodes -- keyword search falls back to an ` +
+            'in-memory rebuild; run `memory ingest --force`'
+          : behind > 0
+            ? `${index.docCount}/${stats.nodes} nodes indexed; ${behind} are invisible to keyword search`
+            : `${index.docCount.toLocaleString()} nodes indexed`,
+    });
+
     const orphans = await orphanCount(store);
     checks.push({
       name: 'orphans',

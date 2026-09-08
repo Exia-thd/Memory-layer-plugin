@@ -1,12 +1,12 @@
 import type { Layer, MemoryNode, SearchHit, SearchResult } from '../types.js';
-import type { MemoryStore } from '../store/store.js';
+import type { MemoryStore, NodeSummary } from '../store/store.js';
 import type { EmbeddingProvider } from '../embed/index.js';
 import { Bm25Index } from './bm25.js';
-import { semanticSearch } from './semantic.js';
-import { recencySearch, decayFactor } from './recency.js';
+import { persistedBm25Search } from './persisted-bm25.js';
+import { decayFactor, DAY_MS } from './recency.js';
 import { fuse, type Branch } from './rrf.js';
-import { EXACT_SCAN_LIMIT } from '../store/capabilities.js';
-import { DAY_MS } from './recency.js';
+import { clampMaxDistance } from '../embed/types.js';
+import { tokenize } from '../util/tokenize.js';
 import { readMeta } from '../store/meta.js';
 
 export interface SearchOptions {
@@ -24,41 +24,42 @@ export interface SearchOptions {
 export const DEFAULT_STALE_AFTER_DAYS = 180;
 
 /**
- * Nodes and the keyword index, cached against the store's write counter.
+ * Fallback keyword index, for a store written before the persisted one existed.
  *
- * Rebuilding the inverted index on every query costs most of the latency of a
- * search, and in a long-lived MCP server the store usually has not changed
- * between queries. The counter is the same one that tells a read-only handle its
- * snapshot is stale, so the cache cannot outlive a write: if it moved, this is
- * discarded rather than served.
- *
- * A short-lived CLI process gets no benefit from this and pays nothing for it.
+ * Kept behind the write counter so it cannot outlive the write that invalidated
+ * it. The normal path never builds this at all.
  */
 interface Snapshot {
   writeSeq: number;
-  nodes: MemoryNode[];
   index: Bm25Index;
 }
 
 const snapshots = new Map<string, Snapshot>();
 
-function snapshotFor(store: MemoryStore, nodes: MemoryNode[], writeSeq: number): Bm25Index {
-  const cached = snapshots.get(store.dir);
-  if (cached && cached.writeSeq === writeSeq) return cached.index;
-
-  const index = new Bm25Index();
-  index.addAll(nodes.map((node) => ({ id: node.id, text: `${node.title}\n${node.body}` })));
-  snapshots.set(store.dir, { writeSeq, nodes, index });
-  return index;
-}
-
-/** Drops cached indexes. Exposed so a test can prove the cache is not what is being tested. */
 export function clearSearchCache(): void {
   snapshots.clear();
 }
 
+async function fallbackIndex(store: MemoryStore, writeSeq: number): Promise<Bm25Index> {
+  const cached = snapshots.get(store.dir);
+  if (cached && cached.writeSeq === writeSeq) return cached.index;
+
+  const index = new Bm25Index();
+  index.addAll(
+    (await store.allNodes()).map((node) => ({ id: node.id, text: `${node.title}\n${node.body}` })),
+  );
+  snapshots.set(store.dir, { writeSeq, index });
+  return index;
+}
+
 /**
  * Three branches fused by RRF, with a report of what each one contributed.
+ *
+ * Each branch narrows the store to candidates before anything is loaded: keyword
+ * hits come from posting rows, similarity is ranked inside the database, and
+ * only the nodes that survive fusion are read in full. Nothing here reads the
+ * whole store, which is what makes the cost scale with the query rather than
+ * with how much has been remembered.
  *
  * The report is not diagnostics decoration. Whether a branch was missing changes
  * how much the ranking should be trusted, so it travels with the results where
@@ -73,35 +74,50 @@ export async function search(
   const limit = options.limit ?? 10;
   const now = options.now ?? Date.now();
   const staleAfterDays = options.staleAfterDays ?? DEFAULT_STALE_AFTER_DAYS;
-
   const writeSeq = readMeta(store.dir).writeSeq;
-  const cached = snapshots.get(store.dir);
-  const allNodes = cached?.writeSeq === writeSeq ? cached.nodes : await store.allNodes();
-
-  // The keyword index covers the whole store; filtering by layer happens on the
-  // way out, so a layer-restricted query cannot poison the cache for other queries.
-  const keywordIndex = snapshotFor(store, allNodes, writeSeq);
-
   const wanted = options.layers && options.layers.length > 0 ? new Set(options.layers) : null;
-  const nodes = wanted ? allNodes.filter((node) => wanted.has(node.layer)) : allNodes;
 
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const terms = [...new Set(tokenize(query))];
+  const postings = terms.length > 0 ? await store.postingsFor(terms) : new Map();
+
+  // Keyword ranking and term-overlap both come from the same posting rows, and
+  // both are narrowed to a shortlist before anything is read from the store. A
+  // common term can appear in most of the corpus, so fetching a row per
+  // candidate would turn a cheap query into a scan of everything.
+  const keyword = await keywordHits(store, query, limit, writeSeq, options.disableBm25);
+  const overlapRanked = rankByOverlap(postings, terms, limit);
+
+  const shortlist = [...new Set([...keyword.ranked, ...overlapRanked])].slice(0, limit * 12);
+  const summaries = await store.nodeSummaries(shortlist);
+
+  const eligible = (id: string): boolean => {
+    const summary = summaries.get(id);
+    if (!summary) return false;
+    if (summary.supersededAt) return false;
+    return !wanted || wanted.has(summary.layer);
+  };
+
   const branches: Branch[] = [];
-
-  branches.push(keywordBranch(keywordIndex, byId, query, limit, options.disableBm25));
-  branches.push(await semanticBranch(nodes, query, embedder, limit, options));
   branches.push({
-    name: 'recency',
-    ranked: recencySearch(nodes, query, { limit: limit * 3, now }).map((hit) => hit.id),
+    name: 'bm25',
+    ranked: keyword.ranked.filter(eligible).slice(0, limit * 3),
+    ...(keyword.unavailableReason ? { unavailableReason: keyword.unavailableReason } : {}),
+    ...(keyword.degradedReason ? { degradedReason: keyword.degradedReason } : {}),
   });
+  branches.push(await semanticBranch(store, query, embedder, limit, options));
+  branches.push(recencyBranch(overlapRanked, postings, summaries, terms, limit, now, eligible));
 
   const { hits, report } = fuse(branches);
   const top = hits.slice(0, limit);
 
+  // Only the winners are loaded in full.
+  const nodes = await store.getNodes(top.map((hit) => hit.id));
+
   const results: SearchHit[] = [];
   for (const hit of top) {
-    const node = byId.get(hit.id);
+    const node = nodes.get(hit.id);
     if (!node) continue;
+    if (wanted && !wanted.has(node.layer)) continue;
     results.push({
       id: node.id,
       title: node.title,
@@ -118,34 +134,70 @@ export async function search(
   return { results, fusion: report };
 }
 
-function keywordBranch(
-  index: Bm25Index,
-  eligible: Map<string, MemoryNode>,
+async function keywordHits(
+  store: MemoryStore,
   query: string,
   limit: number,
+  writeSeq: number,
   disabled?: boolean,
-): Branch {
+): Promise<{ ranked: string[]; unavailableReason?: string; degradedReason?: string }> {
   if (disabled) {
-    return {
-      name: 'bm25',
-      ranked: [],
-      unavailableReason: 'Keyword branch disabled by caller.',
-    };
+    return { ranked: [], unavailableReason: 'Keyword branch disabled by caller.' };
   }
 
-  // Over-fetch, then drop anything outside the requested layers, so a layer
-  // filter narrows the results rather than the search.
-  const ranked = index
-    .search(query, limit * 6)
-    .map((hit) => hit.id)
-    .filter((id) => eligible.has(id))
-    .slice(0, limit * 3);
+  // The persisted index is the normal path; rebuilding in memory is the fallback
+  // for an older store. Which one answered is reported, because a silent fallback
+  // here is the difference between a query and a full scan of everything.
+  let hits: { id: string }[] | null = null;
+  let degradedReason: string | undefined;
 
-  return { name: 'bm25', ranked };
+  try {
+    hits = await persistedBm25Search(store, query, limit * 6);
+    if (hits === null) {
+      degradedReason =
+        'This store has no persisted keyword index, so it was rebuilt in memory. ' +
+        'Run `memory ingest --force` to build one.';
+    }
+  } catch (err) {
+    degradedReason = `Persisted keyword index unreadable, rebuilt in memory: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
+  }
+
+  const ranked = (hits ?? (await fallbackIndex(store, writeSeq)).search(query, limit * 6)).map(
+    (hit) => hit.id,
+  );
+
+  return degradedReason ? { ranked, degradedReason } : { ranked };
+}
+
+/**
+ * Orders candidates by how much of the query they cover, using only the posting
+ * lists.
+ *
+ * This runs before anything is read from the store, so the recency branch pays
+ * for a shortlist rather than for every document containing a common word.
+ */
+function rankByOverlap(
+  postings: Map<string, Map<string, { tf: number; length: number }>>,
+  terms: string[],
+  limit: number,
+): string[] {
+  if (terms.length === 0) return [];
+
+  const overlap = new Map<string, number>();
+  for (const list of postings.values()) {
+    for (const id of list.keys()) overlap.set(id, (overlap.get(id) ?? 0) + 1);
+  }
+
+  return [...overlap.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit * 6)
+    .map(([id]) => id);
 }
 
 async function semanticBranch(
-  nodes: MemoryNode[],
+  store: MemoryStore,
   query: string,
   embedder: EmbeddingProvider | null,
   limit: number,
@@ -162,8 +214,9 @@ async function semanticBranch(
     };
   }
 
-  const embedded = nodes.filter((node) => node.embedding && node.embeddingModel);
-  if (embedded.length === 0) {
+  const identity = embedder.identity;
+  const total = await store.embeddedCount();
+  if (total === 0) {
     return {
       name: 'semantic',
       ranked: [],
@@ -172,21 +225,14 @@ async function semanticBranch(
   }
 
   // Vectors from different spaces are not comparable, so only the ones written by
-  // the current provider take part -- and the caller is told the rest sat out.
-  const identity = embedder.identity;
-  const comparable = embedded.filter(
-    (node) =>
-      node.embeddingModel === identity.model &&
-      node.embeddingProvider === identity.provider &&
-      node.embedding?.length === identity.dimensions,
-  );
-
-  if (comparable.length === 0) {
+  // the active provider take part -- and the caller is told the rest sat out.
+  const comparable = await store.embeddedCount(identity.model, identity.provider);
+  if (comparable === 0) {
     return {
       name: 'semantic',
       ranked: [],
       unavailableReason:
-        `Every embedding in this store belongs to a different vector space than the ` +
+        `All ${total} embeddings in this store belong to a different vector space than the ` +
         `active provider (${identity.model}/${identity.provider}). Re-embed to use this branch.`,
     };
   }
@@ -197,26 +243,75 @@ async function semanticBranch(
       return { name: 'semantic', ranked: [], unavailableReason: 'Embedding the query returned nothing.' };
     }
 
-    const hits = semanticSearch(comparable, queryVector, {
-      limit: limit * 3,
-      maxDistance: options.maxDistance,
-      scanLimit: EXACT_SCAN_LIMIT,
-    });
+    const maxDistance = clampMaxDistance(options.maxDistance ?? 0.5);
+    const ranked = (
+      await store.semanticTopK(queryVector, {
+        limit: limit * 3,
+        model: identity.model,
+        provider: identity.provider,
+        layers: options.layers,
+      })
+    )
+      .filter((hit) => 1 - hit.similarity <= maxDistance)
+      .map((hit) => hit.id);
 
-    const branch: Branch = { name: 'semantic', ranked: hits.map((hit) => hit.id) };
-    if (comparable.length < embedded.length) {
-      branch.unavailableReason =
-        `${embedded.length - comparable.length} of ${embedded.length} embedded nodes ` +
-        `belong to another vector space and were skipped.`;
+    const branch: Branch = { name: 'semantic', ranked };
+    if (comparable < total) {
+      branch.degradedReason =
+        `${total - comparable} of ${total} embedded nodes belong to another vector space ` +
+        `and were skipped.`;
     }
     return branch;
   } catch (err) {
     return {
       name: 'semantic',
       ranked: [],
-      unavailableReason: `Embedding the query failed: ${err instanceof Error ? err.message : String(err)}`,
+      unavailableReason: `Semantic search failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+/**
+ * Ranks candidates by importance and freshness.
+ *
+ * Candidates come from the posting lists, so this branch only ever sees nodes
+ * that share a term with the query. Without that restriction it would return the
+ * newest rows regardless of subject, and a branch that answers every query is a
+ * branch that answers none of them.
+ */
+function recencyBranch(
+  candidates: string[],
+  postings: Map<string, Map<string, { tf: number; length: number }>>,
+  summaries: Map<string, NodeSummary>,
+  terms: string[],
+  limit: number,
+  now: number,
+  eligible: (id: string) => boolean,
+): Branch {
+  if (terms.length === 0) {
+    return { name: 'recency', ranked: [], unavailableReason: 'The query contains no indexable terms.' };
+  }
+
+  const overlap = new Map<string, number>();
+  for (const list of postings.values()) {
+    for (const id of list.keys()) overlap.set(id, (overlap.get(id) ?? 0) + 1);
+  }
+
+  const scored: { id: string; score: number }[] = [];
+  for (const id of candidates) {
+    if (!eligible(id)) continue;
+    const summary = summaries.get(id);
+    if (!summary) continue;
+    const coverage = (overlap.get(id) ?? 0) / terms.length;
+    scored.push({ id, score: coverage * (summary.importance || 1) * decayFactor(summary, now) });
+  }
+
+  const ranked = scored
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .slice(0, limit * 3)
+    .map((hit) => hit.id);
+
+  return { name: 'recency', ranked };
 }
 
 /** A window around the first query term, so the excerpt shows why the hit matched. */

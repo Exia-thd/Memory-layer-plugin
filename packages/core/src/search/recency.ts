@@ -52,7 +52,8 @@ export function recencySearch(
   return hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, limit);
 }
 
-export function decayFactor(node: MemoryNode, now = Date.now()): number {
+/** Accepts anything carrying a layer and a creation time, so a summary is enough. */
+export function decayFactor(node: { layer: string; createdAt: number }, now = Date.now()): number {
   const halfLife = HALF_LIFE_DAYS[node.layer] ?? 90;
   if (!Number.isFinite(halfLife)) return 1;
   const ageDays = Math.max(0, (now - node.createdAt) / DAY_MS);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import {
-  formatReport, readRegistry, forgetProject, LAYERS, EDGE_TYPES,
+  formatReport, forgetProject, LAYERS, EDGE_TYPES,
   type Layer, type EdgeType,
 } from '@memory-layer/core';
 import * as api from './api.js';
@@ -292,12 +292,20 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'list': {
-      const entries = readRegistry();
+      const entries = await api.runList();
       emit(args, entries, () =>
         entries.length === 0
           ? 'no registered projects'
           : entries
-              .map((e) => `${e.name.padEnd(24)}${e.path}${e.stats ? `  (${e.stats.nodes} nodes)` : ''}`)
+              .map((e) => {
+                const nodes = e.stats ? `${e.stats.nodes} nodes` : 'not indexed';
+                const state = e.freshness.unavailable
+                  ? `unreachable: ${e.freshness.unavailable}`
+                  : e.freshness.stale
+                    ? 'STALE - re-run `memory ingest`'
+                    : 'current';
+                return `${e.name.padEnd(24)}${nodes.padEnd(16)}${state.padEnd(34)}${e.path}`;
+              })
               .join('\n'),
       );
       return 0;

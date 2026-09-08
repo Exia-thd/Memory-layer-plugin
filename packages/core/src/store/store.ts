@@ -7,6 +7,8 @@ import { ddl, SCHEMA_VERSION } from './schema.js';
 import { readMeta, writeMeta, bumpWriteSeq, type StoreMeta } from './meta.js';
 import { log } from '../util/log.js';
 import { awaitHandleRelease } from './reopen.js';
+import { tokenize } from '../util/tokenize.js';
+import { decodePostings, encodePostings, type Postings } from '../search/postings.js';
 
 /**
  * Lock behaviour, measured rather than assumed (see docs/m0-findings.md):
@@ -72,6 +74,9 @@ export class MemoryStore {
   private openedAtSeq = -1;
   private meta: StoreMeta | null = null;
   private transactionDepth = 0;
+  /** Index updates accumulated during a transaction, written once at the end. */
+  private termDelta = new Map<string, Postings>();
+  private docDelta = new Map<string, number>();
 
   constructor(dir: string, private readonly options: OpenOptions = {}) {
     this.dir = dir;
@@ -215,7 +220,129 @@ export class MemoryStore {
         embedding: node.embedding ?? zeros(this.dimensions),
       },
     );
+
+    // Indexing happens here rather than in a separate pass, so there is no way to
+    // write a node that the keyword index does not know about.
+    this.stageForIndex(node);
     return 'created';
+  }
+
+  /**
+   * Queues a node's terms for the index.
+   *
+   * Buffered rather than written immediately: a node touches dozens of terms, and
+   * a read-modify-write per term per node would make ingest quadratic in row
+   * updates. The buffer is flushed once, inside the same transaction.
+   */
+  private stageForIndex(node: MemoryNode): void {
+    const tokens = tokenize(`${node.title}\n${node.body}`);
+    this.docDelta.set(node.id, tokens.length);
+
+    const counts = new Map<string, number>();
+    for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+
+    for (const [term, tf] of counts) {
+      let postings = this.termDelta.get(term);
+      if (!postings) {
+        postings = new Map();
+        this.termDelta.set(term, postings);
+      }
+      postings.set(node.id, { tf, length: tokens.length });
+    }
+  }
+
+  /** Writes the buffered index updates. Called inside the transaction, before COMMIT. */
+  private async flushIndex(): Promise<void> {
+    if (this.termDelta.size === 0 && this.docDelta.size === 0) return;
+
+    const terms = [...this.termDelta.keys()];
+    const existing = new Map<string, string>();
+
+    // Read the affected rows in batches rather than one query per term.
+    for (let offset = 0; offset < terms.length; offset += 256) {
+      const batch = terms.slice(offset, offset + 256);
+      const rows = await this.run(
+        'MATCH (t:Bm25Term) WHERE list_contains($terms, t.term) RETURN t.term AS term, t.postings AS postings',
+        { terms: batch },
+      );
+      for (const row of rows) existing.set(row.term as string, (row.postings as string) ?? '');
+    }
+
+    for (const [term, delta] of this.termDelta) {
+      const current = existing.has(term) ? decodePostings(existing.get(term)!) : (new Map() as Postings);
+      for (const [id, entry] of delta) current.set(id, entry);
+      const encoded = encodePostings(current);
+
+      if (existing.has(term)) {
+        await this.run('MATCH (t:Bm25Term) WHERE t.term = $term SET t.postings = $postings, t.df = $df', {
+          term, postings: encoded, df: current.size,
+        });
+      } else {
+        await this.run('CREATE (t:Bm25Term {term: $term, postings: $postings, df: $df})', {
+          term, postings: encoded, df: current.size,
+        });
+      }
+    }
+
+    let addedDocs = 0;
+    let addedLength = 0;
+    for (const [id, length] of this.docDelta) {
+      const found = await this.run('MATCH (d:Bm25Doc) WHERE d.node_id = $id RETURN d.length AS length', { id });
+      if (found.length > 0) {
+        addedLength += length - Number(found[0]!.length ?? 0);
+        await this.run('MATCH (d:Bm25Doc) WHERE d.node_id = $id SET d.length = $length', { id, length });
+      } else {
+        addedDocs += 1;
+        addedLength += length;
+        await this.run('CREATE (d:Bm25Doc {node_id: $id, length: $length})', { id, length });
+      }
+    }
+
+    const stat = await this.query(
+      "MATCH (s:Bm25Stat) WHERE s.id = 'global' RETURN s.doc_count AS docs, s.total_length AS total",
+    );
+    if (stat.length > 0) {
+      await this.run(
+        `MATCH (s:Bm25Stat) WHERE s.id = 'global'
+         SET s.doc_count = s.doc_count + $docs, s.total_length = s.total_length + $total`,
+        { docs: addedDocs, total: addedLength },
+      );
+    } else {
+      await this.run(
+        "CREATE (s:Bm25Stat {id: 'global', doc_count: $docs, total_length: $total})",
+        { docs: addedDocs, total: addedLength },
+      );
+    }
+
+    this.termDelta.clear();
+    this.docDelta.clear();
+  }
+
+  /** Posting lists for the given terms, read straight from the store. */
+  async postingsFor(terms: string[]): Promise<Map<string, Postings>> {
+    const found = new Map<string, Postings>();
+    if (terms.length === 0) return found;
+
+    for (let offset = 0; offset < terms.length; offset += 256) {
+      const batch = terms.slice(offset, offset + 256);
+      const rows = await this.run(
+        'MATCH (t:Bm25Term) WHERE list_contains($terms, t.term) RETURN t.term AS term, t.postings AS postings',
+        { terms: batch },
+      );
+      for (const row of rows) found.set(row.term as string, decodePostings((row.postings as string) ?? ''));
+    }
+    return found;
+  }
+
+  async indexStats(): Promise<{ docCount: number; totalLength: number }> {
+    const rows = await this.query(
+      "MATCH (s:Bm25Stat) WHERE s.id = 'global' RETURN s.doc_count AS docs, s.total_length AS total",
+    );
+    const row = rows[0];
+    return {
+      docCount: Number(row?.docs ?? 0),
+      totalLength: Number(row?.total ?? 0),
+    };
   }
 
   async setEmbedding(
@@ -282,6 +409,130 @@ export class MemoryStore {
     const filter = includeSuperseded ? '' : 'WHERE m.superseded_at = 0';
     const rows = await this.query(`MATCH (m:Memory) ${filter} RETURN ${NODE_COLUMNS}`);
     return rows.map(rowToNode);
+  }
+
+  /**
+   * The fields a ranking needs, without the body or the vector.
+   *
+   * Search used to load every node in full to rank them, which meant moving
+   * bodies and 384-float vectors for rows that were never going to be returned.
+   */
+  async nodeSummaries(ids: string[]): Promise<Map<string, NodeSummary>> {
+    const summaries = new Map<string, NodeSummary>();
+    if (ids.length === 0) return summaries;
+
+    for (let offset = 0; offset < ids.length; offset += 512) {
+      const batch = ids.slice(offset, offset + 512);
+      const rows = await this.run(
+        `MATCH (m:Memory) WHERE list_contains($ids, m.id)
+         RETURN m.id AS id, m.layer AS layer, m.importance AS importance,
+                m.created_at AS createdAt, m.superseded_at AS supersededAt`,
+        { ids: batch },
+      );
+      for (const row of rows) {
+        summaries.set(row.id as string, {
+          id: row.id as string,
+          layer: row.layer as Layer,
+          importance: Number(row.importance ?? 0),
+          createdAt: Number(row.createdAt ?? 0),
+          supersededAt: Number(row.supersededAt ?? 0) || null,
+        });
+      }
+    }
+    return summaries;
+  }
+
+  /**
+   * Nodes recorded against a file path.
+   *
+   * Matches provenance as well as file_path, because a decision written with a
+   * source_ref of docs/billing.md#L3-L8 is about that file whether or not anyone
+   * also set file_path. Filtering in the database keeps this from being a reason
+   * to load the whole store.
+   */
+  async nodesAnchoredToPath(target: string): Promise<MemoryNode[]> {
+    const normalized = target.replace(/\\/g, '/');
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.superseded_at = 0
+         AND (m.file_path = $exact
+              OR ends_with(m.file_path, $suffix)
+              OR starts_with(m.source_ref, $prefix)
+              OR contains(m.source_ref, $suffix))
+       RETURN ${NODE_COLUMNS}`,
+      { exact: normalized, suffix: `/${normalized}`, prefix: `${normalized}#` },
+    );
+    return rows.map(rowToNode);
+  }
+
+  async getNodes(ids: string[]): Promise<Map<string, MemoryNode>> {
+    const nodes = new Map<string, MemoryNode>();
+    if (ids.length === 0) return nodes;
+    const rows = await this.run(
+      `MATCH (m:Memory) WHERE list_contains($ids, m.id) RETURN ${NODE_COLUMNS}`,
+      { ids },
+    );
+    for (const row of rows) {
+      const node = rowToNode(row);
+      nodes.set(node.id, node);
+    }
+    return nodes;
+  }
+
+  /**
+   * Nearest neighbours, ranked inside the database.
+   *
+   * array_cosine_similarity is a built-in function rather than part of the
+   * vector extension, so it works on platforms where no vector index can be
+   * installed. Ranking here rather than in JavaScript means the vectors never
+   * leave the store -- only the winning ids do.
+   */
+  async semanticTopK(
+    queryVector: number[],
+    options: { limit: number; model: string; provider: string; layers?: Layer[] },
+  ): Promise<{ id: string; similarity: number }[]> {
+    if (queryVector.length !== this.dimensions) {
+      throw new Error(
+        `Query vector is ${queryVector.length} wide but this store is FLOAT[${this.dimensions}].`,
+      );
+    }
+
+    const layerFilter =
+      options.layers && options.layers.length > 0 ? 'AND list_contains($layers, m.layer)' : '';
+
+    // The width is interpolated because CAST needs a literal type; it comes from
+    // meta.json and is validated as digits at init, never from a caller.
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.embedding_model = $model AND m.embedding_provider = $provider
+         AND m.superseded_at = 0 ${layerFilter}
+       RETURN m.id AS id,
+              array_cosine_similarity(m.embedding, CAST($q AS FLOAT[${this.dimensions}])) AS sim
+       ORDER BY sim DESC LIMIT ${Math.max(1, Math.floor(options.limit))}`,
+      {
+        q: queryVector,
+        model: options.model,
+        provider: options.provider,
+        ...(layerFilter ? { layers: options.layers as string[] } : {}),
+      },
+    );
+
+    return rows.map((row) => ({ id: row.id as string, similarity: Number(row.sim ?? 0) }));
+  }
+
+  /** How many nodes carry a vector from the given space. */
+  async embeddedCount(model?: string, provider?: string): Promise<number> {
+    if (model === undefined) {
+      const rows = await this.query(
+        `MATCH (m:Memory) WHERE m.embedding_model <> '' RETURN count(*) AS n`,
+      );
+      return Number(rows[0]?.n ?? 0);
+    }
+    const rows = await this.run(
+      'MATCH (m:Memory) WHERE m.embedding_model = $model AND m.embedding_provider = $provider RETURN count(*) AS n',
+      { model, provider: provider ?? '' },
+    );
+    return Number(rows[0]?.n ?? 0);
   }
 
   async edgesFor(ids: string[]): Promise<MemoryEdge[]> {
@@ -405,12 +656,16 @@ export class MemoryStore {
     let result: T;
     try {
       result = await fn();
+      // The index is part of the same write: it commits with the nodes or not at all.
+      await this.flushIndex();
     } catch (err) {
       try {
         await conn.query('ROLLBACK');
       } catch (rollbackErr) {
         log('error', 'rollback failed after a failed write', rollbackErr);
       }
+      this.termDelta.clear();
+      this.docDelta.clear();
       this.transactionDepth = 0;
       throw err;
     }
@@ -447,6 +702,14 @@ async function rows(result: unknown): Promise<Record<string, unknown>[]> {
   const first = Array.isArray(result) ? result[0] : result;
   if (!first) return [];
   return (await (first as { getAll(): Promise<unknown[]> }).getAll()) as Record<string, unknown>[];
+}
+
+export interface NodeSummary {
+  id: string;
+  layer: Layer;
+  importance: number;
+  createdAt: number;
+  supersededAt: number | null;
 }
 
 const NODE_COLUMNS = `m.id AS id, m.layer AS layer, m.title AS title, m.body AS body,

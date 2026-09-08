@@ -12,6 +12,14 @@ export interface Branch {
    * nothing. The distinction is the whole point of the fusion report.
    */
   unavailableReason?: string;
+  /**
+   * Set when the branch answered, but through a lesser route than intended.
+   *
+   * Distinct from being unavailable: the results are real and are used. It still
+   * belongs in the report, because a fallback nobody is told about is the same
+   * failure as a branch nobody is told is empty.
+   */
+  degradedReason?: string;
 }
 
 export interface FusedHit {
@@ -52,6 +60,9 @@ export function fuse(branches: Branch[], k = RRF_K): FusionOutcome {
     } else if (branch.ranked.length === 0) {
       degraded.push(branch.name);
       reasons[branch.name] = 'Branch ran and matched nothing.';
+    } else if (branch.degradedReason) {
+      degraded.push(branch.name);
+      reasons[branch.name] = branch.degradedReason;
     }
 
     for (const [index, id] of branch.ranked.entries()) {

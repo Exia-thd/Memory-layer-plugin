@@ -5,7 +5,11 @@ import {
   type SearchResult, type Subgraph, type Conflict, type Cluster, type DoctorReport,
   type IngestReport, log,
 } from '@memory-layer/core';
-import { resolveProject, storeDirFor, ensureGitignore, storeDirOrThrow, isStale } from './project.js';
+import {
+  resolveProject, storeDirFor, ensureGitignore, storeDirOrThrow, isStale, isStaleAsync,
+  mapWithLimit, type Staleness,
+} from './project.js';
+import { readRegistry, type RegistryEntry } from '@memory-layer/core';
 
 /**
  * One implementation of each capability, shared by the CLI and the MCP server.
@@ -148,26 +152,28 @@ export async function runWhy(
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
     const provider = await embedder(store.dimensions);
-    const nodes = await store.allNodes();
+    const limit = options.limit ?? 10;
 
-    // Anchor on provenance first. A decision recorded against docs/billing.md#L3-L8
-    // is about that file even though nobody set file_path, so both are checked.
-    const anchored = nodes.filter((node) => anchorsTo(node, target));
+    // Anchor on provenance first, filtered in the database rather than by reading
+    // every node. A path anchors on file_path or source_ref; a bare symbol has
+    // neither, so it falls through to the text branches below.
+    const anchored = looksLikePath(target)
+      ? await store.nodesAnchoredToPath(target)
+      : [];
 
-    // Then widen by wording, so a bare symbol name works as well as a path.
-    const result = await search(store, target.replace(/[/_.\\-]+/g, ' '), provider, {
-      limit: options.limit ?? 10,
+    // Then widen by wording, so a symbol name works as well as a path.
+    const found = await search(store, target.replace(/[/_.\\-]+/g, ' '), provider, {
+      limit,
       layers: ['semantic', 'episodic', 'procedural'],
     });
 
-    const seen = new Set(result.results.map((hit) => hit.id));
-    // Explaining code means explaining decisions, so anchored reasoning outranks
-    // whatever the text branches happened to surface.
-    const ordered = [...anchored].sort((a, b) => rank(a) - rank(b) || b.importance - a.importance);
-
-    for (const node of ordered.reverse()) {
-      if (seen.has(node.id)) continue;
-      result.results.unshift({
+    // Explaining code means explaining decisions, so anchored reasoning leads --
+    // including a node the text branches also found, which would otherwise be
+    // ranked below one that only anchored.
+    const anchoredIds = new Set(anchored.map((node) => node.id));
+    const lead = [...anchored]
+      .sort((a, b) => rank(a) - rank(b) || b.importance - a.importance)
+      .map((node) => ({
         id: node.id,
         title: node.title,
         score: Number.POSITIVE_INFINITY,
@@ -176,41 +182,29 @@ export async function runWhy(
         snippet: node.body.slice(0, 220),
         createdAt: node.createdAt,
         ranks: { anchor: 1 },
-      });
-    }
+      }));
+
+    found.results = [...lead, ...found.results.filter((hit) => !anchoredIds.has(hit.id))].slice(0, limit);
 
     // Anchoring is a retrieval branch and is reported as one; otherwise a result
     // set answered entirely by anchors reads as "every branch found nothing".
-    result.fusion.branches.anchor = anchored.length;
+    found.fusion.branches.anchor = anchored.length;
     if (anchored.length === 0) {
-      result.fusion.degraded.push('anchor');
-      result.fusion.reasons.anchor = `No memory is recorded against ${target}.`;
+      found.fusion.degraded.push('anchor');
+      found.fusion.reasons.anchor = looksLikePath(target)
+        ? `No memory is recorded against ${target}.`
+        : `${target} is not a path, so nothing could be anchored; this is a text search.`;
     }
 
-    return { ...result, anchoredTo: target };
+    return { ...found, anchoredTo: target };
   } finally {
     await store.close();
   }
 }
 
-/** True when a node was recorded against this file path or symbol. */
-function anchorsTo(node: MemoryNode, target: string): boolean {
-  const normalized = target.replace(/\\/g, '/');
-  const candidates = [node.filePath, node.sourceRef?.split('#')[0]].filter(
-    (value): value is string => Boolean(value),
-  );
-
-  for (const candidate of candidates) {
-    if (candidate === normalized) return true;
-    if (candidate.endsWith(`/${normalized}`)) return true;
-  }
-
-  // A symbol name, matched as a whole word so `retry` does not pull in `retryable`.
-  if (!normalized.includes('/') && !normalized.includes('.')) {
-    const word = new RegExp(`\\b${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-    return word.test(node.title) || word.test(node.body);
-  }
-  return false;
+/** A path has a separator or an extension; a bare symbol has neither. */
+function looksLikePath(target: string): boolean {
+  return target.includes('/') || target.includes('\\') || /\.[a-z0-9]{1,6}$/i.test(target);
 }
 
 /** Decisions and constraints before the events that prompted them. */
@@ -404,6 +398,26 @@ export async function runMerge(options: { from?: string } = {}): Promise<{ merge
  * Distinct from search because there is no query -- this answers "what rules
  * apply here", which is what a session needs before it has a question.
  */
+export interface ListedProject extends RegistryEntry {
+  freshness: Staleness;
+}
+
+/**
+ * Every registered project with its index freshness.
+ *
+ * The freshness check spawns git per project, so the checks run concurrently
+ * with a cap: done one at a time, a large registry turns a listing into a long
+ * wait, and a listing nobody is willing to run is a listing that never reports
+ * a stale index.
+ */
+export async function runList(options: { concurrency?: number } = {}): Promise<ListedProject[]> {
+  const entries = readRegistry();
+  const freshness = await mapWithLimit(entries, options.concurrency ?? 8, (entry) =>
+    isStaleAsync(entry.storagePath),
+  );
+  return entries.map((entry, index) => ({ ...entry, freshness: freshness[index]! }));
+}
+
 export async function runConstraints(
   options: { from?: string; limit?: number } = {},
 ): Promise<MemoryNode[]> {

@@ -120,6 +120,10 @@ outcome from one that is live, and the difference matters to whoever wrote it.
 
 ## 3. Keyword search: how fast is a hand-written BM25
 
+> Superseded by section 7. The numbers below are what the in-memory index cost,
+> and are kept because they are the reason the index was moved into the store.
+
+
 Inverted index, `k1=1.2`, `b=0.75`, shared tokenizer for indexing and querying.
 
 | Nodes | Index build | Query (p50) | Heap |
@@ -228,3 +232,75 @@ indistinguishable from a feature that works.**
 
 Three of four have numbers. The fourth is blocked by the environment, not by the
 design, and is the first thing to run on a machine with model-hub access.
+
+---
+
+## 7. The keyword index moved into the store (R4)
+
+The in-memory index had to read and tokenise every node before answering
+anything. A long-lived MCP server paid that once; every CLI command paid it
+again. At 100,000 nodes that was 8 seconds of build before the first result.
+
+Postings now live in the store, one row per term rather than one row per
+(term, document) pair, with the document length carried in the entry so scoring
+needs no second lookup. A query reads the rows for its own terms and nothing
+else.
+
+### Measured, 20,000 nodes
+
+| | Before | After |
+|---|---|---|
+| Index build on startup | ~8 s at 100k / ~750 ms at 10k | none |
+| Query, warm process | 100 ms (after a 493 ms build) | **50 ms** |
+| Query, cold CLI process | ~800 ms at 1k | **414 ms** at 20k |
+
+The cold CLI number is mostly not search: the process floor is **231 ms** before
+anything is read, against a bare `node -e ""` of 29 ms. Loading the native
+LadybugDB binding is the bulk of it, and it is paid even by `memory help`. That
+is the next thing worth fixing, and it is a startup problem rather than a search
+one.
+
+### Two mistakes found by measuring rather than by reasoning
+
+**A candidate set is not a shortlist.** The first version fetched a summary row
+for every document containing any query term. On a corpus with few distinct
+words that is the whole store, batched into hundreds of `list_contains` scans:
+**8 seconds a query at 20,000 nodes**, worse than the in-memory index it
+replaced. Ranking now happens on the posting lists alone and only the shortlist
+is read.
+
+**A synthetic corpus can measure a pathology instead of a system.** The 8-second
+figure came from a generator with a 34-word vocabulary, which puts every
+document in every posting list. Real prose has thousands of distinct terms. Both
+numbers are honest; only the second is about this design.
+
+---
+
+## 8. WASM parsing, measured at last (R5)
+
+Until the AST chunker was actually running (section 6) there was nothing to
+measure. A threshold was set before measuring, to keep the answer from being
+argued backwards: **if parsing exceeds 40% of ingest, reopen native bindings for
+the CLI.**
+
+1,500 files, 12.8 MB, 17,011 chunks:
+
+| Stage | Time | Share |
+|---|---|---|
+| read | 53 ms | 1.6% |
+| **parse (WASM tree-sitter)** | **941 ms** | **27.8%** |
+| redact | 179 ms | 5.3% |
+| embed (hash fallback) | 2,211 ms | 65.3% |
+| total | 3,387 ms | |
+
+**Below the threshold, and the margin is larger than it looks.** This used the
+hash embedder, which is the fastest embedding step that will ever run here. A
+real ONNX model is far slower, so embedding grows and the parse share only falls.
+27.8% is the worst case for WASM, not the typical one.
+
+Decision: one WASM implementation for both the CLI and the browser stands. No
+native bindings, no second parser path to keep working. Closed.
+
+A native comparison was not run. It would not change the decision -- parsing
+would have to be more than a third of ingest before it could -- and saying so is
+better than a number that looks like diligence and settles nothing.

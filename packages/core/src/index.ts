@@ -14,7 +14,9 @@ export { ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, ty
 
 export * from './embed/index.js';
 
-export { Bm25Index, type Bm25Hit } from './search/bm25.js';
+export { Bm25Index, K1, B, type Bm25Hit } from './search/bm25.js';
+export { persistedBm25Search } from './search/persisted-bm25.js';
+export { encodePostings, decodePostings, type Postings } from './search/postings.js';
 export { semanticSearch, cosineSimilarity } from './search/semantic.js';
 export { recencySearch, decayFactor, HALF_LIFE_DAYS, DAY_MS } from './search/recency.js';
 export { fuse, RRF_K, type Branch, type FusionOutcome } from './search/rrf.js';

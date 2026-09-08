@@ -66,6 +66,7 @@ into the session; nothing needs to be configured by hand.
 | `memory clusters` | Communities in the memory graph |
 | `memory write` / `memory link` | Record a memory, or relate two |
 | `memory merge` | Fold queued session writes into the store |
+| `memory list` | Registered projects, with index freshness |
 | `memory doctor` | What is actually working |
 | `memory serve` | MCP server on stdio |
 
@@ -78,10 +79,16 @@ rather than file path — one file can hold several decisions that disagree, and
 collapsing them to the file would merge them.
 
 ```
-query ├─► BM25 (in-process inverted index) ─┐
-      ├─► semantic (exact cosine scan)      ─┼─► RRF k=60 ─► graph expansion
-      └─► recency × importance              ─┘
+query ├─► BM25 (posting rows in the store)     ─┐
+      ├─► semantic (cosine ranked in-database) ─┼─► RRF k=60 ─► graph expansion
+      └─► recency × importance                 ─┘
 ```
+
+Each branch narrows to candidates before anything is loaded: keyword hits come
+from one row per query term, similarity is ranked inside the database by
+`array_cosine_similarity`, and only the nodes that survive fusion are read in
+full. Nothing on this path reads the whole store, so the cost scales with the
+query rather than with how much has been remembered.
 
 Every result carries a `fusion` block:
 
@@ -121,10 +128,29 @@ Each one guards a failure that has actually been observed, and each has a test.
 | C8 | Every import is a declared dependency. |
 | C9 | No claiming a capability that is not implemented. |
 | C10 | A reader never serves a snapshot from before the last write. |
+| C11 | The write counter advances only after a durable commit, never before. |
 
-C10 came out of M0 rather than from the original plan: a read-only LadybugDB
-handle is frozen at its open point and reports no error when it falls behind.
-See [docs/m0-findings.md](docs/m0-findings.md).
+C10 and C11 came out of measurement rather than from the plan. A read-only
+LadybugDB handle is frozen at its open point and reports no error when it falls
+behind; and because the counter that fixes that lives outside the database, the
+order of committing and advancing it is a contract in its own right. Getting it
+backwards would leave the guard asserting a falsehood, which is worse than not
+having one. See [docs/m0-findings.md](docs/m0-findings.md).
+
+### The rule behind all of them
+
+The three worst bugs in this project's history have the same shape: a component
+went missing, a `try/catch` or a `?? []` absorbed it, and the system carried on
+at lower quality **emitting no signal at all**. Silent RRF decay when a branch
+returned nothing; a keyword branch that became `undefined` and was patched to an
+empty array; an AST chunker that never once ran.
+
+So:
+
+> **Anything that can be absent while the system keeps working must have a line
+> in `capabilities`. There is no exception for "this one is always there".**
+
+The AST chunker was the thing everyone was sure was always there.
 
 ```bash
 node --test tests/*.test.js     # 34 tests
@@ -168,9 +194,13 @@ semantic ones do not. Decay demotes; it does not remove.
 
 ## Known limits
 
-- **The keyword index is built in memory.** Fine to ~10,000 nodes; at 100,000 it
-  takes 8 s to build and 412 ms a query. A persisted index is the first thing to
-  add when a store outgrows that.
+- **Process startup costs more than search now.** A cold CLI command spends
+  231 ms loading modules -- chiefly the native database binding, which even
+  `memory help` pays for -- against roughly 180 ms of actual work at 20,000
+  nodes. Deferring that load is the next worthwhile change.
+- **Semantic search is still an exact scan.** There is no vector index on these
+  platforms, so its cost grows with the number of embedded nodes even though the
+  scan now happens inside the database.
 - **The default embedding threshold is unvalidated for prose.** 384 dimensions
   and a 0.5 cosine cutoff were tuned on source code, not on decision text. This
   needs measuring on a machine that can reach the model hub.

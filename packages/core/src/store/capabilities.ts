@@ -17,15 +17,19 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
   const capabilities: Capabilities = {
     graph: { provider: 'ladybugdb', status: 'available' },
     fts: {
-      provider: 'js-bm25',
+      provider: 'persisted-bm25',
       status: 'available',
-      reason: 'BM25 is implemented in-process; the LadybugDB FTS extension is not required.',
+      reason:
+        'Postings are stored alongside the nodes, so a query reads one row per term ' +
+        'and no index is rebuilt at startup. The LadybugDB FTS extension is not required.',
     },
     vectorSearch: {
       provider: 'exact-scan',
       status: 'available',
       exactScanLimit: EXACT_SCAN_LIMIT,
-      reason: 'No vector index on this platform; cosine similarity runs as an exact scan.',
+      reason:
+        'No vector index on this platform; cosine similarity is ranked inside the database ' +
+        'by array_cosine_similarity, so cost grows with the number of embedded nodes.',
     },
     embeddings: { provider: 'unknown', status: 'unavailable', reason: 'Not probed yet.' },
     // Ingest gets a capability line too. Anything that can be absent while the
