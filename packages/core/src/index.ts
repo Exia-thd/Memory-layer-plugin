@@ -1,7 +1,8 @@
 export * from './types.js';
-export { MemoryStore, StoreLockedError } from './store/store.js';
+export { MemoryStore, StoreLockedError, WriteSeqError } from './store/store.js';
 export { SCHEMA_VERSION, DEFAULT_DIMENSIONS, parseDimensions, ddl } from './store/schema.js';
 export { readMeta, writeMeta, updateMeta, bumpWriteSeq, type StoreMeta } from './store/meta.js';
+export { awaitHandleRelease, HandleStillLockedError, DEFAULT_RELEASE_BUDGET_MS } from './store/reopen.js';
 export { probeCapabilities, summarizeCapability, EXACT_SCAN_LIMIT } from './store/capabilities.js';
 export * from './store/registry.js';
 export * as journal from './store/journal.js';
@@ -9,7 +10,7 @@ export * as journal from './store/journal.js';
 export { chunk, characterChunk, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP, type Chunk } from './ingest/chunker.js';
 export { redact, looksRedacted } from './ingest/redact.js';
 export { ingest, type IngestOptions, type IngestReport } from './ingest/ingest.js';
-export { ruleForFile, KNOWN_LANGUAGES } from './ingest/languages.js';
+export { ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, type AstCapability } from './ingest/languages.js';
 
 export * from './embed/index.js';
 

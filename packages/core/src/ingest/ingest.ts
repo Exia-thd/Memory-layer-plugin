@@ -6,7 +6,6 @@ import type { EmbeddingProvider } from '../embed/index.js';
 import { chunk } from './chunker.js';
 import { redact } from './redact.js';
 import { nodeId, contentHash } from '../util/ids.js';
-import { updateMeta } from '../store/meta.js';
 import { log } from '../util/log.js';
 
 export interface IngestOptions {
@@ -75,8 +74,13 @@ export async function ingest(
     report.files += 1;
     const pieces = await chunk(file, content);
 
+    // Redaction and embedding happen before the transaction opens. Both are slow,
+    // and a write transaction holds the store's exclusive lock -- there is no
+    // reason for an embedding round trip to block every other writer.
+    const prepared: { node: MemoryNode; vector: number[] | null }[] = [];
+
     for (const [index, piece] of pieces.entries()) {
-      // Redaction happens here, before the text reaches an embedder. Once a secret
+      // Redaction runs here, before the text reaches an embedder. Once a secret
       // is in a vector, masking the text afterwards changes nothing.
       const { text, redactions } = redact(piece.text);
       for (const entry of redactions) {
@@ -90,6 +94,7 @@ export async function ingest(
 
       const layer = options.layer ?? 'artifact';
       const title = titleFor(piece.headingPath, relative, index, pieces.length);
+      const now = Date.now();
       const node: MemoryNode = {
         id: nodeId(layer, sourceRef, text),
         layer,
@@ -99,37 +104,54 @@ export async function ingest(
         filePath: relative,
         importance: options.importance ?? 3,
         confidence: options.confidence ?? 0.7,
-        createdAt: Date.now(),
-        lastSeenAt: Date.now(),
+        createdAt: now,
+        lastSeenAt: now,
         accessCount: 0,
         supersededAt: null,
         embedding: null,
       };
 
-      const outcome = await store.upsertNode(node);
-      if (outcome === 'created') report.created += 1;
-      else report.refreshed += 1;
-
-      if (options.embedder && outcome === 'created') {
+      let vector: number[] | null = null;
+      if (options.embedder) {
         try {
-          const [vector] = await options.embedder.embed([`${title}\n${text}`]);
-          if (vector) {
-            await store.setEmbedding(node.id, vector, options.embedder.identity);
-            report.embedded += 1;
-          }
+          vector = (await options.embedder.embed([`${title}\n${text}`]))[0] ?? null;
         } catch (err) {
-          // The node is already stored; losing its vector costs recall on one
-          // branch, and is reported rather than aborting the whole ingest.
+          // The node is still worth storing; losing its vector costs recall on
+          // one branch, and is reported rather than aborting the whole ingest.
           log('warn', `embedding failed for ${sourceRef}`, err);
         }
       }
+
+      prepared.push({ node, vector });
     }
 
+    // One transaction per file, matching the granularity of fileHashes: an ingest
+    // that fails halfway leaves whole files done and the rest untouched, so the
+    // next run picks up exactly where this one stopped.
+    const fileHash = { ...fileHashes, [relative]: hash };
+    const counts = await store.transact(async () => {
+      let created = 0;
+      let refreshed = 0;
+      let embedded = 0;
+
+      for (const { node, vector } of prepared) {
+        const outcome = await store.upsertNode(node);
+        if (outcome === 'created') created += 1;
+        else refreshed += 1;
+
+        if (vector && options.embedder && outcome === 'created') {
+          await store.setEmbedding(node.id, vector, options.embedder.identity);
+          embedded += 1;
+        }
+      }
+      return { created, refreshed, embedded };
+    }, { fileHashes: fileHash });
+
+    report.created += counts.created;
+    report.refreshed += counts.refreshed;
+    report.embedded += counts.embedded;
     fileHashes[relative] = hash;
   }
-
-  updateMeta(store.dir, { fileHashes });
-  store.commit();
 
   report.redactions = [...redactionTotals.entries()].map(([rule, count]) => ({ rule, count }));
   return report;

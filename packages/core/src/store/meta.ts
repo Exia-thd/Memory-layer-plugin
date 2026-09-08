@@ -53,9 +53,18 @@ export function updateMeta(dir: string, patch: Partial<StoreMeta>): StoreMeta {
   return next;
 }
 
-export function bumpWriteSeq(dir: string): StoreMeta {
-  const meta = readMeta(dir);
-  meta.writeSeq += 1;
+/**
+ * Advances the write counter, optionally folding in other metadata changes.
+ *
+ * The patch rides along in the same write so there is no window where the
+ * counter says the store moved but the metadata describing it has not -- and no
+ * second meta write that could fail on its own.
+ *
+ * Only ever called from MemoryStore.transact, after a successful COMMIT.
+ */
+export function bumpWriteSeq(dir: string, patch: Partial<StoreMeta> = {}): StoreMeta {
+  const meta = { ...readMeta(dir), ...patch };
+  meta.writeSeq = readMeta(dir).writeSeq + 1;
   meta.indexedAt = new Date().toISOString();
   writeMeta(dir, meta);
   return meta;

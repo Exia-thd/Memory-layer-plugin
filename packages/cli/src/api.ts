@@ -1,6 +1,6 @@
 import {
   MemoryStore, StoreLockedError, ingest, search, neighbors, clusters, conflicts, doctor,
-  probeCapabilities, selectProvider, parseDimensions, updateMeta, upsertProject, journal,
+  probeCapabilities, selectProvider, parseDimensions, upsertProject, journal,
   nodeId, redact, type EmbeddingProvider, type Layer, type EdgeType, type MemoryNode,
   type SearchResult, type Subgraph, type Conflict, type Cluster, type DoctorReport,
   type IngestReport, log,
@@ -280,30 +280,35 @@ export async function runWrite(
   let store: MemoryStore | null = null;
   try {
     store = new MemoryStore(storeDir);
-    await store.upsertNode(node);
 
+    // Embed first: the model call is slow, and a write transaction holds the
+    // store's exclusive lock for as long as it is open.
+    let vector: number[] | null = null;
     const provider = await embedder(store.dimensions);
     if (provider) {
       try {
-        const [vector] = await provider.embed([`${node.title}\n${node.body}`]);
-        if (vector) await store.setEmbedding(node.id, vector, provider.identity);
+        vector = (await provider.embed([`${node.title}\n${node.body}`]))[0] ?? null;
       } catch (err) {
         log('warn', `could not embed ${node.id}`, err);
       }
     }
 
-    for (const link of input.links ?? []) {
-      await store.addEdge({
-        from: node.id,
-        to: link.to,
-        type: link.type,
-        weight: link.weight ?? 1,
-        createdAt: now,
-        evidenceRef: null,
-      });
-    }
+    await store.transact(async () => {
+      await store!.upsertNode(node);
+      if (vector && provider) await store!.setEmbedding(node.id, vector, provider.identity);
 
-    store.commit();
+      for (const link of input.links ?? []) {
+        await store!.addEdge({
+          from: node.id,
+          to: link.to,
+          type: link.type,
+          weight: link.weight ?? 1,
+          createdAt: now,
+          evidenceRef: null,
+        });
+      }
+    });
+
     return { id: node.id, queued: false, redactions };
   } catch (err) {
     if (!(err instanceof StoreLockedError)) throw err;
@@ -337,8 +342,7 @@ export async function runLink(
   let store: MemoryStore | null = null;
   try {
     store = new MemoryStore(storeDir);
-    await store.addEdge(edge);
-    store.commit();
+    await store.transact(async () => store!.addEdge(edge));
     return { queued: false };
   } catch (err) {
     if (!(err instanceof StoreLockedError)) throw err;
@@ -358,26 +362,31 @@ export async function runMerge(options: { from?: string } = {}): Promise<{ merge
   let store: MemoryStore | null = null;
   try {
     store = new MemoryStore(storeDir);
-    let merged = 0;
-    for (const file of files) {
-      for (const entry of journal.readEntries(file)) {
-        if (entry.kind === 'node' && entry.node) {
-          await store.upsertNode(entry.node);
-          merged += 1;
-        } else if (entry.kind === 'edge' && entry.edge) {
-          // An edge whose endpoints never merged is dropped with a reason rather
-          // than aborting the rest of the batch.
-          try {
-            await store.addEdge(entry.edge);
-            merged += 1;
-          } catch (err) {
-            log('warn', 'dropping journal edge with missing endpoint', err);
+    const merged = await store.transact(async () => {
+      let count = 0;
+      for (const file of files) {
+        for (const entry of journal.readEntries(file)) {
+          if (entry.kind === 'node' && entry.node) {
+            await store!.upsertNode(entry.node);
+            count += 1;
+          } else if (entry.kind === 'edge' && entry.edge) {
+            // An edge whose endpoints never merged is dropped with a reason
+            // rather than losing the whole batch to one bad reference.
+            try {
+              await store!.addEdge(entry.edge);
+              count += 1;
+            } catch (err) {
+              log('warn', 'dropping journal edge with missing endpoint', err);
+            }
           }
         }
       }
-      journal.discard(file);
-    }
-    store.commit();
+      return count;
+    });
+
+    // Journals are discarded only once the merge is durable; a crash before this
+    // point replays them, and upserts are idempotent.
+    for (const file of files) journal.discard(file);
     return { merged, files: files.length, skipped: null };
   } catch (err) {
     if (err instanceof StoreLockedError) {
@@ -449,9 +458,11 @@ export async function runEmbed(options: { from?: string; force?: boolean } = {})
 
     const identity = provider.identity;
     const nodes = await store.allNodes();
-    let embedded = 0;
     let skipped = 0;
 
+    // Every vector is computed before the transaction opens, so the exclusive
+    // lock is held for the writes alone rather than for the whole model run.
+    const pending: { id: string; vector: number[] }[] = [];
     for (const node of nodes) {
       const current =
         node.embeddingModel === identity.model &&
@@ -462,14 +473,17 @@ export async function runEmbed(options: { from?: string; force?: boolean } = {})
         continue;
       }
       const [vector] = await provider.embed([`${node.title}\n${node.body}`]);
-      if (!vector) continue;
-      await store.setEmbedding(node.id, vector, identity);
-      embedded += 1;
+      if (vector) pending.push({ id: node.id, vector });
     }
 
-    updateMeta(store.dir, { embedding: { model: identity.model, provider: identity.provider } });
-    store.commit();
-    return { embedded, skipped };
+    await store.transact(
+      async () => {
+        for (const { id, vector } of pending) await store.setEmbedding(id, vector, identity);
+      },
+      { embedding: { model: identity.model, provider: identity.provider } },
+    );
+
+    return { embedded: pending.length, skipped };
   } finally {
     await store.close();
   }

@@ -2,6 +2,7 @@ import { Database, Connection } from '@ladybugdb/core';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Capabilities, Capability } from '../types.js';
+import { probeAstChunking } from '../ingest/languages.js';
 import { log } from '../util/log.js';
 
 /**
@@ -27,6 +28,10 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
       reason: 'No vector index on this platform; cosine similarity runs as an exact scan.',
     },
     embeddings: { provider: 'unknown', status: 'unavailable', reason: 'Not probed yet.' },
+    // Ingest gets a capability line too. Anything that can be absent while the
+    // system keeps working needs one -- the AST chunker was absent for its whole
+    // existence, fell back to character windows, and reported nothing.
+    astChunking: await probeAstChunking(),
   };
 
   let db: Database | null = null;

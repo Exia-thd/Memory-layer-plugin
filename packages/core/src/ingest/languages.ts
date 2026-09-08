@@ -116,6 +116,12 @@ function grammarDir(): string | null {
  */
 async function treeSitter(): Promise<TreeSitterModule | null> {
   runtime ??= (async () => {
+    // An operator switch, and the seam the capability probe is tested through.
+    if (process.env.MEMORY_LAYER_DISABLE_AST === '1') {
+      log('info', 'AST chunking disabled by MEMORY_LAYER_DISABLE_AST=1');
+      return null;
+    }
+
     let module: Record<string, unknown>;
     try {
       module = require('web-tree-sitter') as Record<string, unknown>;
@@ -206,6 +212,91 @@ export async function newParser(rule: LanguageRule): Promise<TreeSitterParser | 
     log('warn', `failed to construct parser for ${rule.label}`, err);
     return null;
   }
+}
+
+/**
+ * Whether a language can actually be parsed right now.
+ *
+ * A predicate, deliberately, rather than something the caller learns by catching
+ * an exception. "There is no parser" is a state worth being able to ask about;
+ * discovering it from a swallowed throw is how the AST chunker ran as a
+ * character chunker for its entire existence without anything looking wrong.
+ */
+export async function isLanguageAvailable(label: string): Promise<boolean> {
+  const rule = RULES[label];
+  if (!rule || !rule.grammar) return false;
+  return (await newParser(rule)) !== null;
+}
+
+/**
+ * Whether AST chunking works on this machine, checked once against a known-good
+ * snippet so the answer is about the toolchain rather than about one file.
+ *
+ * Recorded into `capabilities` at init, which is what makes a silent fallback to
+ * character windows visible in `doctor` on every machine -- rather than only
+ * where somebody remembered to write a test for it.
+ */
+export async function probeAstChunking(): Promise<AstCapability> {
+  const rule = RULES.typescript!;
+  const available: string[] = [];
+
+  const parser = await newParser(rule);
+  if (!parser) {
+    // Turned off on purpose is a different report from broken. Both mean worse
+    // chunks, but only one is something to go and fix.
+    const disabled = process.env.MEMORY_LAYER_DISABLE_AST === '1';
+    return {
+      provider: 'web-tree-sitter',
+      status: disabled ? 'degraded' : 'unavailable',
+      reason: disabled
+        ? 'Disabled by MEMORY_LAYER_DISABLE_AST=1; chunking uses character windows.'
+        : 'Could not construct a parser, so chunking falls back to character windows ' +
+          'and chunks will not follow declaration boundaries.',
+      languages: [],
+    };
+  }
+
+  try {
+    const tree = parser.parse('function probe() { return 1; }') as {
+      rootNode: { children: { type: string }[] };
+    };
+    if (!tree.rootNode.children.some((child) => child.type === 'function_declaration')) {
+      return {
+        provider: 'web-tree-sitter',
+        status: 'degraded',
+        reason:
+          'A parser was built but did not recognise a function declaration, so ' +
+          'declaration boundaries cannot be trusted.',
+        languages: [],
+      };
+    }
+  } catch (err) {
+    return {
+      provider: 'web-tree-sitter',
+      status: 'unavailable',
+      reason: `Parsing a known-good snippet failed: ${err instanceof Error ? err.message : String(err)}`,
+      languages: [],
+    };
+  }
+
+  for (const label of Object.keys(RULES)) {
+    if (RULES[label]?.grammar && (await isLanguageAvailable(label))) available.push(label);
+  }
+
+  return {
+    provider: 'web-tree-sitter',
+    status: 'available',
+    reason: `Declaration-boundary chunking for ${available.length} languages.`,
+    languages: available,
+  };
+}
+
+export interface AstCapability {
+  provider: string;
+  status: 'available' | 'unavailable' | 'degraded';
+  reason: string;
+  languages: string[];
+  [extra: string]: unknown;
 }
 
 export const KNOWN_LANGUAGES = Object.keys(RULES);

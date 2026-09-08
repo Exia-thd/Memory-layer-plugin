@@ -6,6 +6,7 @@ import { EDGE_TYPES } from '../types.js';
 import { ddl, SCHEMA_VERSION } from './schema.js';
 import { readMeta, writeMeta, bumpWriteSeq, type StoreMeta } from './meta.js';
 import { log } from '../util/log.js';
+import { awaitHandleRelease } from './reopen.js';
 
 /**
  * Lock behaviour, measured rather than assumed (see docs/m0-findings.md):
@@ -25,6 +26,25 @@ import { log } from '../util/log.js';
 export interface OpenOptions {
   readOnly?: boolean;
   bufferPoolBytes?: number;
+}
+
+/**
+ * The store committed, but the counter that tells readers so did not advance.
+ *
+ * This is the worst state the store can be in and it must never pass quietly:
+ * the data is durable, and every reader is pinned to the snapshot before it,
+ * permanently. Louder than the write failing outright.
+ */
+export class WriteSeqError extends Error {
+  constructor(dir: string, cause: unknown) {
+    super(
+      `Wrote to ${dir} successfully, but could not advance writeSeq in meta.json: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}. ` +
+        `Readers will not see this write until meta.json is writable again.`,
+    );
+    this.name = 'WriteSeqError';
+    this.cause = cause;
+  }
 }
 
 export class StoreLockedError extends Error {
@@ -51,6 +71,7 @@ export class MemoryStore {
   private conn: Connection | null = null;
   private openedAtSeq = -1;
   private meta: StoreMeta | null = null;
+  private transactionDepth = 0;
 
   constructor(dir: string, private readonly options: OpenOptions = {}) {
     this.dir = dir;
@@ -76,6 +97,10 @@ export class MemoryStore {
     if (this.conn && this.readOnly && seq !== this.openedAtSeq) {
       log('debug', 'reopening read-only handle after write', { was: this.openedAtSeq, now: seq });
       await this.close();
+      // On Windows the old handle -- and its write-ahead log especially -- can
+      // still be releasing. Reopening into that window fails on the first
+      // statement, so wait for the release rather than discover it later.
+      await awaitHandleRelease(this.dbPath);
     }
 
     if (this.conn) return this.conn;
@@ -339,9 +364,78 @@ export class MemoryStore {
     return { nodes: Number(n), edges: Number(e), embedded: Number(v), byLayer };
   }
 
-  /** Records that the store changed, so read-only handles know to reopen. */
-  commit(): void {
-    this.meta = bumpWriteSeq(this.dir);
+  /**
+   * Runs a unit of work as one transaction, then advances the write counter.
+   *
+   * The order is the contract, not an implementation detail. writeSeq lives in
+   * meta.json, outside the database, so the two steps can only be sequenced by
+   * hand:
+   *
+   *   COMMIT succeeds  ->  then bump.   A reader in the gap sees old data under
+   *                                     the old counter: consistent, and it will
+   *                                     pick the write up on its next look.
+   *   bump first       ->  a reader sees the new counter, reopens, reads the old
+   *                        data, and caches it as current. The guard against
+   *                        stale snapshots would then be asserting a falsehood --
+   *                        worse than not having one.
+   *
+   * So the bump lives here and nowhere else. Rolling back skips it, because
+   * nothing was written for a reader to miss.
+   */
+  async transact<T>(fn: () => Promise<T>, metaPatch: Partial<StoreMeta> = {}): Promise<T> {
+    if (this.readOnly) {
+      throw new Error(`Cannot write through a read-only handle on ${this.dir}.`);
+    }
+
+    // Nested calls join the outer transaction; BEGIN inside BEGIN is an error,
+    // and a nested unit of work has no business committing on its own.
+    if (this.transactionDepth > 0) {
+      this.transactionDepth += 1;
+      try {
+        return await fn();
+      } finally {
+        this.transactionDepth -= 1;
+      }
+    }
+
+    const conn = await this.connection();
+    await conn.query('BEGIN TRANSACTION');
+    this.transactionDepth = 1;
+
+    let result: T;
+    try {
+      result = await fn();
+    } catch (err) {
+      try {
+        await conn.query('ROLLBACK');
+      } catch (rollbackErr) {
+        log('error', 'rollback failed after a failed write', rollbackErr);
+      }
+      this.transactionDepth = 0;
+      throw err;
+    }
+
+    try {
+      await conn.query('COMMIT');
+    } catch (err) {
+      // Nothing became durable, so there is nothing for readers to miss.
+      this.transactionDepth = 0;
+      throw err;
+    }
+    this.transactionDepth = 0;
+
+    try {
+      this.meta = bumpWriteSeq(this.dir, metaPatch);
+    } catch (err) {
+      throw new WriteSeqError(this.dir, err);
+    }
+
+    return result;
+  }
+
+  /** True while a transaction is open. Used by tests asserting the ordering. */
+  get inTransaction(): boolean {
+    return this.transactionDepth > 0;
   }
 }
 

@@ -4,6 +4,7 @@ import type { MemoryStore } from './store/store.js';
 import { pendingCount } from './store/journal.js';
 import { summarizeCapability } from './store/capabilities.js';
 import { identityLabel, type EmbeddingIdentity } from './embed/types.js';
+import { probeAstChunking } from './ingest/languages.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -53,12 +54,30 @@ export async function doctor(
   }
 
   for (const [name, capability] of Object.entries(meta.capabilities ?? {})) {
+    // Re-probed below against the live toolchain rather than read back.
+    if (name === 'astChunking') continue;
     checks.push({
       name,
       status: capability.status === 'available' ? 'ok' : capability.status === 'degraded' ? 'warn' : 'fail',
       detail: summarizeCapability(capability),
     });
   }
+
+  // AST chunking is re-probed rather than read back, because it depends on
+  // installed packages that can change after init. A machine where it silently
+  // stopped working looks identical to one where it never worked, and the
+  // difference only shows up as quietly worse chunks.
+  const ast = await probeAstChunking();
+  const recorded = meta.capabilities?.astChunking;
+  checks.push({
+    name: 'astChunking',
+    status: ast.status === 'available' ? 'ok' : ast.status === 'degraded' ? 'warn' : 'fail',
+    detail:
+      `${ast.provider} -- ${ast.reason}` +
+      (recorded && recorded.status !== ast.status
+        ? ` (recorded as ${recorded.status} at init; it has changed since)`
+        : ''),
+  });
 
   if (stats) {
     const missing = stats.nodes - stats.embedded;
