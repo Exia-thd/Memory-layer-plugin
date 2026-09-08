@@ -1,0 +1,9 @@
+{
+  "memory-layer": {
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/packages/cli/dist/cli.js", "serve"],
+    "env": {
+      "MEMORY_LAYER_LOG_LEVEL": "warn"
+    }
+  }
+}

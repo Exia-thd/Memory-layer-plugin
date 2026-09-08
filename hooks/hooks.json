@@ -1,0 +1,43 @@
+{
+  "description": "Loads active constraints at session start, and offers memory context when the agent reaches for raw search.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-hook.mjs\" session-start",
+            "statusMessage": "Loading project memory..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-hook.mjs\" pre-tool",
+            "statusMessage": "Checking project memory..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-hook.mjs\" post-tool",
+            "statusMessage": "Recording to project memory..."
+          }
+        ]
+      }
+    ]
+  }
+}

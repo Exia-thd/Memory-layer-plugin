@@ -1,0 +1,23 @@
+{
+  "name": "@memory-layer/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node --test ../../tests/*.test.js"
+  },
+  "dependencies": {
+    "@ladybugdb/core": "0.20.3",
+    "graphology": "^0.25.4",
+    "graphology-communities-louvain": "^2.0.1",
+    "tree-sitter-wasms": "^0.1.11",
+    "web-tree-sitter": "0.24.7"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.0.0"
+  }
+}

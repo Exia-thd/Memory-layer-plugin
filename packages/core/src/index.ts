@@ -1,0 +1,31 @@
+export * from './types.js';
+export { MemoryStore, StoreLockedError } from './store/store.js';
+export { SCHEMA_VERSION, DEFAULT_DIMENSIONS, parseDimensions, ddl } from './store/schema.js';
+export { readMeta, writeMeta, updateMeta, bumpWriteSeq, type StoreMeta } from './store/meta.js';
+export { probeCapabilities, summarizeCapability, EXACT_SCAN_LIMIT } from './store/capabilities.js';
+export * from './store/registry.js';
+export * as journal from './store/journal.js';
+
+export { chunk, characterChunk, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP, type Chunk } from './ingest/chunker.js';
+export { redact, looksRedacted } from './ingest/redact.js';
+export { ingest, type IngestOptions, type IngestReport } from './ingest/ingest.js';
+export { ruleForFile, KNOWN_LANGUAGES } from './ingest/languages.js';
+
+export * from './embed/index.js';
+
+export { Bm25Index, type Bm25Hit } from './search/bm25.js';
+export { semanticSearch, cosineSimilarity } from './search/semantic.js';
+export { recencySearch, decayFactor, HALF_LIFE_DAYS, DAY_MS } from './search/recency.js';
+export { fuse, RRF_K, type Branch, type FusionOutcome } from './search/rrf.js';
+export { search, clearSearchCache, DEFAULT_STALE_AFTER_DAYS, type SearchOptions } from './search/search.js';
+
+export { neighbors, DEFAULT_DEPTH, MAX_DEPTH, type Subgraph, type TraverseOptions } from './graph/traverse.js';
+export { clusters, type Cluster } from './graph/cluster.js';
+export { conflicts, type Conflict } from './graph/conflicts.js';
+
+export { doctor, formatReport, type DoctorReport, type Check } from './doctor.js';
+
+export { tokenize, tokenSet, stem } from './util/tokenize.js';
+export { nodeId, contentHash, shortHash } from './util/ids.js';
+export { canonicalizePath, samePath, storeDirFor, globalDir, registryPath, PLUGIN_DIR_NAME } from './util/paths.js';
+export { log, failOpen, logFilePath } from './util/log.js';
