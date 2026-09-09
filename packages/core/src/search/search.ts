@@ -1,4 +1,5 @@
 import type { Layer, MemoryNode, SearchHit, SearchResult } from '../types.js';
+import { DEFAULT_MAX_DISTANCE } from '../embed/types.js';
 import type { MemoryStore, NodeSummary } from '../store/store.js';
 import type { EmbeddingProvider } from '../embed/index.js';
 import { Bm25Index } from './bm25.js';
@@ -243,7 +244,7 @@ async function semanticBranch(
       return { name: 'semantic', ranked: [], unavailableReason: 'Embedding the query returned nothing.' };
     }
 
-    const maxDistance = clampMaxDistance(options.maxDistance ?? 0.5);
+    const maxDistance = clampMaxDistance(options.maxDistance ?? DEFAULT_MAX_DISTANCE);
     const ranked = (
       await store.semanticTopK(queryVector, {
         limit: limit * 3,

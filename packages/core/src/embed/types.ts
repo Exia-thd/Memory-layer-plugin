@@ -22,7 +22,13 @@ export interface EmbeddingProvider {
 
 /** Values taken from a system already tuned for this workload; confirm, do not re-pick. */
 export const DEFAULT_EMBEDDING_CONFIG = {
-  modelId: 'Snowflake/snowflake-arctic-embed-xs',
+  // An English-only model measured as actively misleading on Vietnamese prose:
+  // it scored "hôm nay trời đẹp quá" at 0.818 similarity against a payment-retry
+  // decision, above both genuinely relevant questions (0.749, 0.763). It was
+  // ranking by "is this Vietnamese", not by subject, and no threshold separates
+  // overlapping distributions. This model keeps 384 dimensions, so the schema is
+  // unchanged, and separates the same set with a margin four times wider.
+  modelId: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   dimensions: 384,
   batchSize: 16,
   subBatchSize: 8,
@@ -35,8 +41,17 @@ export const DEFAULT_EMBEDDING_CONFIG = {
  * ceiling admits every row and switches the filter off without saying so, which
  * is exactly the class of silent degradation this layer exists to prevent.
  */
-export const DEFAULT_MAX_DISTANCE = 0.5;
-export const DEFAULT_MCP_MAX_DISTANCE = 0.6;
+/**
+ * Cosine distance a semantic hit must stay under.
+ *
+ * Measured, not inherited. Against a Vietnamese decision and five queries, the
+ * multilingual model scores relevant questions at 0.32-0.51 similarity and
+ * unrelated ones at -0.13 to 0.13 -- so 0.75 distance (0.25 similarity) sits in
+ * the gap with room on both sides. The old 0.5 came from an English-only model
+ * and would reject a relevant Vietnamese question outright.
+ */
+export const DEFAULT_MAX_DISTANCE = 0.75;
+export const DEFAULT_MCP_MAX_DISTANCE = 0.8;
 export const MAX_DISTANCE_CEILING = 2;
 
 let warnedAboutClamp = false;

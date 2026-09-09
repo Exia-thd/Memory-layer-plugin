@@ -304,3 +304,89 @@ native bindings, no second parser path to keep working. Closed.
 A native comparison was not run. It would not change the decision -- parsing
 would have to be more than a third of ingest before it could -- and saying so is
 better than a number that looks like diligence and settles nothing.
+
+---
+
+## M0 #2, answered — and the answer was not the threshold
+
+This question stayed open through the whole build: *are 384 dimensions and a 0.5
+cosine cutoff right for decision prose?* It was recorded as unanswerable because
+the model would not download. Both halves of that were wrong.
+
+### The model was never blocked
+
+The failure read `File doesn't exist`, which was recorded as a blocked network.
+It was a path length. Left to itself, transformers.js caches inside its own
+package directory; under pnpm that is
+
+```
+node_modules/.pnpm/@huggingface+transformers@4.2.0/node_modules/@huggingface/transformers/.cache/...
+```
+
+and with the model filename appended it came to **279 characters**, past Windows'
+260-character limit. The write failed and the loader reported the only thing it
+could see. `node fetch` reached the weights fine: HTTP 200, 22.9 MB.
+
+Fixed by caching in `<MEMORY_LAYER_HOME>/models`, which is short, stable, and
+outside any package directory, so a reinstall no longer discards the download.
+
+A second failure surfaced behind it: `device: 'auto'` selected DirectML, which
+refused with `DML EP can only be used with CPU EPs`. A device that does not work
+is a reason to use a different device, not a reason to lose semantic search, so
+the provider now falls back to CPU and says that it did.
+
+### The model was wrong for this corpus
+
+With the model finally running, one Vietnamese decision and five queries:
+
+| Query | Relevant? | `arctic-embed-xs` |
+|---|---|---|
+| vì sao không thử lại nhiều hơn | yes | 0.749 |
+| khách bị trừ tiền hai lần | yes | 0.763 |
+| công thức nấu phở bò | **no** | **0.764** |
+| hôm nay trời đẹp quá | **no** | **0.818** |
+| the weather is nice today | no | 0.518 |
+
+"Nice weather today" scored higher against a payment-retry decision than either
+genuinely relevant question, and the unrelated *English* query scored lowest of
+all. The model was ranking by *which language this is*, not by subject --
+`snowflake-arctic-embed-xs` is English-only, so Vietnamese collapses into a
+narrow region of the space.
+
+**No threshold fixes that.** 0.749 and 0.763 do not separate from 0.764 and
+0.818; the distributions overlap and the wrong one is on top. The open question
+was never the cutoff.
+
+### What replaced it
+
+| Model | Lowest relevant | Highest irrelevant | Margin |
+|---|---|---|---|
+| `snowflake-arctic-embed-xs` | 0.749 | 0.818 | **inverted** |
+| `multilingual-e5-small` | 0.847 | 0.799 | 0.048 |
+| `paraphrase-multilingual-MiniLM-L12-v2` | 0.319 | 0.134 | **0.185** |
+
+`paraphrase-multilingual-MiniLM-L12-v2` separates with a margin nearly four
+times wider, and keeps 384 dimensions -- so the vector table is unchanged and no
+schema migration is involved. Distance threshold moves 0.5 → 0.75 to sit in the
+measured gap.
+
+`doctor` caught the swap on the existing store by itself:
+
+```
+model drift  WARN  stored vectors are Snowflake/snowflake-arctic-embed-xs@384/local,
+                   active provider is Xenova/paraphrase-multilingual-MiniLM-L12-v2@384/local
+```
+
+### Still not settled
+
+The threshold was moved to 0.75 and then did not apply, because the constant was
+also written as a literal in `search.ts`. A configured value that a second copy
+quietly overrides is the same failure this project keeps finding, in its own
+code this time.
+
+After that fix, the three unrelated queries are rejected and one of the two
+relevant ones lands just outside the cutoff -- BM25 still finds it. The serious
+failure, unrelated text scoring above relevant text, is gone. The exact cutoff is
+tuned on five queries against two documents, which is enough to reject a broken
+model and not enough to call calibrated. It needs a real corpus and a written
+query set before anyone should trust the number.

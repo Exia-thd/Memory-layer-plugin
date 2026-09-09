@@ -1,4 +1,5 @@
 import type { MemoryNode } from '../types.js';
+import { DEFAULT_MAX_DISTANCE } from '../embed/types.js';
 import { clampMaxDistance } from '../embed/types.js';
 
 export interface SemanticHit {
@@ -21,7 +22,7 @@ export function semanticSearch(
   options: { limit?: number; maxDistance?: number; scanLimit?: number } = {},
 ): SemanticHit[] {
   const limit = options.limit ?? 20;
-  const maxDistance = clampMaxDistance(options.maxDistance ?? 0.5);
+  const maxDistance = clampMaxDistance(options.maxDistance ?? DEFAULT_MAX_DISTANCE);
   const scanLimit = options.scanLimit ?? 10_000;
 
   const hits: SemanticHit[] = [];

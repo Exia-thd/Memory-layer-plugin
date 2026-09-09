@@ -204,9 +204,17 @@ semantic ones do not. Decay demotes; it does not remove.
 - **Semantic search is still an exact scan.** There is no vector index on these
   platforms, so its cost grows with the number of embedded nodes even though the
   scan now happens inside the database.
-- **The default embedding threshold is unvalidated for prose.** 384 dimensions
-  and a 0.5 cosine cutoff were tuned on source code, not on decision text. This
-  needs measuring on a machine that can reach the model hub.
+- **The embedding cutoff is measured, not calibrated.** The default model is
+  multilingual because an English-only one scored unrelated Vietnamese text
+  *above* relevant Vietnamese text -- it ranked by language, not by subject, and
+  no threshold separates that. The replacement separates with a margin four
+  times wider at the same 384 dimensions. But the 0.75 cutoff comes from five
+  queries against two documents: enough to reject a broken model, not enough to
+  call the number calibrated. See `docs/m0-findings.md`.
+- **Model weights cache in `<MEMORY_LAYER_HOME>/models`.** Not in the package
+  directory, where the path ran to 279 characters under pnpm on Windows and the
+  download failed as `File doesn't exist` -- which reads as a blocked network and
+  was recorded as one. Override with `MEMORY_LAYER_MODEL_CACHE`.
 - **Summaries are written, never generated.** `memory summarize` stores a
   summary the caller wrote and links it to the group members, so it survives the
   grouping being recomputed. Nothing in a read path calls a model. That is the
