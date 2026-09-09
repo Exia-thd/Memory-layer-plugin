@@ -46,15 +46,37 @@ test('R6-a: fifty projects list without the cost adding up', () => {
     cli(repo, ['init']);
 
     const entries = Array.from({ length: 50 }, (_, i) => fakeProject(root, `project-${i}`));
-    fs.writeFileSync(path.join(repo.home, 'registry.json'), JSON.stringify(entries));
+    const registry = path.join(repo.home, 'registry.json');
 
-    const started = Date.now();
-    const listed = JSON.parse(cli(repo, ['list', '--json']));
-    const elapsed = Date.now() - started;
+    // Timed against the same command on one project rather than against a fixed
+    // number of milliseconds.
+    //
+    // What this guards is that freshness is resolved concurrently: listing fifty
+    // must not cost fifty times listing one. An absolute bound measures the
+    // machine instead -- process start and model load dominate a single run and
+    // have nothing to do with the property -- so it passes on an idle laptop and
+    // fails on a loaded CI box for no reason anyone can act on. A ratio moves
+    // with the machine, because both runs pay the same fixed cost.
+    const time = (count) => {
+      fs.writeFileSync(registry, JSON.stringify(entries.slice(0, count)));
+      const started = Date.now();
+      const listed = JSON.parse(cli(repo, ['list', '--json']));
+      return { elapsed: Date.now() - started, listed };
+    };
 
-    assert.equal(listed.length, 50);
-    assert.ok(listed.every((entry) => entry.freshness), 'freshness was not reported per project');
-    assert.ok(elapsed < 3000, `listing 50 projects took ${elapsed}ms`);
+    const one = time(1);
+    const fifty = time(50);
+
+    assert.equal(fifty.listed.length, 50);
+    assert.ok(fifty.listed.every((entry) => entry.freshness), 'freshness was not reported per project');
+
+    // Measured concurrent: about 3x. Serial would be an order of magnitude,
+    // because each project costs a git call of its own.
+    assert.ok(
+      fifty.elapsed < one.elapsed * 5,
+      `listing 50 projects took ${fifty.elapsed}ms against ${one.elapsed}ms for one; ` +
+        'freshness is being resolved serially',
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     repo.cleanup();
