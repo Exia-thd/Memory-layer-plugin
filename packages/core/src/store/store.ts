@@ -137,6 +137,20 @@ export class MemoryStore {
     } catch (err) {
       log('warn', 'closing connection failed', err);
     }
+
+    // The Database owns the file handle; the Connection does not. Dropping the
+    // reference without closing it leaves the handle to the garbage collector.
+    //
+    // Closing it does not make the path reopenable in this process on Windows --
+    // measured, and the reason `create` now hands back an open store -- but a
+    // handle that is released as soon as it is finished with is still the
+    // behaviour to write, and it is what lets a fresh process open the store.
+    try {
+      await this.db?.close();
+    } catch (err) {
+      log('warn', 'closing database failed', err);
+    }
+
     this.conn = null;
     this.db = null;
     this.openedAtSeq = -1;
@@ -153,7 +167,18 @@ export class MemoryStore {
     return rows(await conn.execute(statement, params as never));
   }
 
-  /** Creates the store directory, applies DDL and writes meta.json. */
+  /**
+   * Creates the store directory, applies DDL and writes meta.json.
+   *
+   * The returned store is left **open**, and closing it is the caller's job.
+   *
+   * This is not a convenience. On Windows a LadybugDB path that has been opened
+   * once in a process cannot be opened again in that same process, even after
+   * `close()` -- the second open is refused as though another process held the
+   * lock, and the process it names is this one. Closing here would therefore
+   * hand back a store that nothing in this process could reopen, which is what
+   * made `init` fail on its own doctor run.
+   */
   static async create(dir: string, meta: Omit<StoreMeta, 'schemaVersion' | 'writeSeq'>): Promise<MemoryStore> {
     fs.mkdirSync(dir, { recursive: true });
     const full: StoreMeta = { ...meta, schemaVersion: SCHEMA_VERSION, writeSeq: 0 };
@@ -161,7 +186,6 @@ export class MemoryStore {
 
     const store = new MemoryStore(dir);
     for (const statement of ddl(full.dimensions)) await store.query(statement);
-    await store.close();
     return store;
   }
 

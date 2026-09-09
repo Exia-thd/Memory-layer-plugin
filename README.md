@@ -209,6 +209,20 @@ semantic ones do not. Decay demotes; it does not remove.
   named as such.
 - **Journaled writes lag.** A write made while another process held the lock is
   recorded but not searchable until `memory merge`. `doctor` reports the backlog.
+- **On Windows, one writable open per process.** A LadybugDB path opened for
+  writing cannot be opened for writing again in the same process, even after
+  `close()`; the second open is refused as though another process held the lock,
+  and the process it names is this one. Read-only handles take a shared lock and
+  are unaffected, so search, `why` and the reader's reopen-after-write are not.
+
+  A CLI command writes once and exits, so it never meets this. `memory serve`
+  does: the first write in a session commits and every later one is journaled,
+  reported as `queued` with a note, and counted by `doctor` until `memory merge`
+  runs from another process. Holding one writable handle open for the life of
+  the server removes the queueing, and was measured and rejected -- an abrupt
+  exit then leaves the write-ahead log un-checkpointed and the store does not
+  open again, which is a worse failure than a visible backlog. Journaling is the
+  safer degradation, and it is the one that reports itself.
 
 ---
 

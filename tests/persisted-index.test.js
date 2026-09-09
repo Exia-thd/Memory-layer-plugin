@@ -152,14 +152,34 @@ test('R4-c2: index and nodes commit together or not at all', async () => {
       }),
       /deliberate failure/,
     );
-    await store.close();
+    // A second transaction, this one successful, and read back through the same
+    // handle rather than a reopened one.
+    //
+    // The rolled-back terms were accumulated in memory before the failure, so a
+    // store that rolled the data back but forgot to discard its pending index
+    // delta would flush them here, attached to a node that does not exist. That
+    // is the sharper half of this invariant, and a reopened reader could never
+    // have caught it: reopening throws the delta away on the way past.
+    await store.transact(async () => {
+      await store.upsertNode({
+        id: 'mem_survivor0000000000ab', layer: 'semantic', title: 'Peduncle',
+        body: 'A peduncle decision written after the rollback.', sourceRef: 'docs/y.md#L1-L2',
+        filePath: null, importance: 5, confidence: 1, createdAt: Date.now(),
+        lastSeenAt: Date.now(), accessCount: 0, supersededAt: null, embedding: null,
+      });
+    });
 
     // The node rolled back, so its terms must have rolled back with it. An index
     // holding ids that no longer exist would return hits that cannot be fetched.
-    const reader = await openStore(repo, { readOnly: true });
-    const hits = await persistedBm25Search(reader, 'zygomorphic', 10);
-    assert.deepEqual(hits ?? [], [], 'the index kept terms for a node that was rolled back');
-    await reader.close();
+    const rolled = await persistedBm25Search(store, 'zygomorphic', 10);
+    assert.deepEqual(rolled ?? [], [], 'the index kept terms for a node that was rolled back');
+
+    // ...and the index is still writing, so the emptiness above is a rollback
+    // rather than an index that quietly stopped working.
+    const kept = await persistedBm25Search(store, 'peduncle', 10);
+    assert.equal(kept?.length, 1, 'the node written after the rollback was not indexed');
+
+    await store.close();
   } finally {
     repo.cleanup();
   }

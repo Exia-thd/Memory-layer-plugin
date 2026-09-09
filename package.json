@@ -22,7 +22,10 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@ladybugdb/core"
+      "@ladybugdb/core",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp"
     ]
   }
 }
