@@ -7,7 +7,10 @@ export { probeCapabilities, summarizeCapability, EXACT_SCAN_LIMIT } from './stor
 export * from './store/registry.js';
 export * as journal from './store/journal.js';
 
-export { chunk, characterChunk, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP, type Chunk } from './ingest/chunker.js';
+export {
+  chunk, characterChunk, declarations, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP,
+  type Chunk, type Declaration,
+} from './ingest/chunker.js';
 export { redact, looksRedacted } from './ingest/redact.js';
 export { ingest, type IngestOptions, type IngestReport } from './ingest/ingest.js';
 export { ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, type AstCapability } from './ingest/languages.js';
@@ -28,7 +31,8 @@ export { conflicts, type Conflict } from './graph/conflicts.js';
 
 export { doctor, formatReport, type DoctorReport, type Check } from './doctor.js';
 
-export { tokenize, tokenSet, stem } from './util/tokenize.js';
+export { tokenize, tokenSet, stem, fold, TOKENIZER_VERSION, TOKENIZER_SCRIPTS }
+  from './util/tokenize.js';
 export { nodeId, contentHash, shortHash } from './util/ids.js';
 export { canonicalizePath, samePath, storeDirFor, globalDir, registryPath, PLUGIN_DIR_NAME } from './util/paths.js';
 export { log, failOpen, logFilePath } from './util/log.js';

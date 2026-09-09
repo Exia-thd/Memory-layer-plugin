@@ -58,12 +58,15 @@ into the session; nothing needs to be configured by hand.
 | `memory init` | Create the store, probe what works, report it |
 | `memory ingest <paths>` | Load files into the one store — no import step |
 | `memory search <query>` | Three-branch retrieval with a fusion report |
-| `memory why <file\|symbol>` | Decisions and constraints touching it |
+| `memory why <file\|symbol>` | Decisions and constraints touching it — a bare symbol anchors on the declaration |
+| `memory changes [--scope S]` | What memory records about the files you are about to commit |
 | `memory get <id>` | One node in full, with its edges |
 | `memory graph <id> --depth N` | Walk the memory graph |
 | `memory constraints` | What this project has already settled |
 | `memory conflicts` | Contradictions a person needs to resolve |
-| `memory clusters` | Communities in the memory graph |
+| `memory clusters` | Communities in the memory graph, with any stored summary |
+| `memory summarize <id> --body S` | Record a summary for a group, linked to its members |
+| `memory session start\|end` | Open or close a session, so writes record when they happened |
 | `memory write` / `memory link` | Record a memory, or relate two |
 | `memory merge` | Fold queued session writes into the store |
 | `memory list` | Registered projects, with index freshness |
@@ -204,9 +207,21 @@ semantic ones do not. Decay demotes; it does not remove.
 - **The default embedding threshold is unvalidated for prose.** 384 dimensions
   and a 0.5 cosine cutoff were tuned on source code, not on decision text. This
   needs measuring on a machine that can reach the model hub.
-- **Community detection is not summarised.** `memory clusters` returns raw
-  communities. Clusters without summarisation are community detection, and are
-  named as such.
+- **Summaries are written, never generated.** `memory summarize` stores a
+  summary the caller wrote and links it to the group members, so it survives the
+  grouping being recomputed. Nothing in a read path calls a model. That is the
+  line this project will not cross for a nicer name: retrieval over generated
+  community summaries is a different system, and the one here is community
+  detection with a place to put a summary somebody wrote.
+- **No watch mode, on purpose.** A long-lived watcher would hold the store open
+  to write, which is the reader-versus-writer collision this design avoids by
+  keeping every write a short-lived process. `memory ingest` is already
+  incremental through `fileHashes`; a watcher would buy convenience at the cost
+  of the property that makes concurrent sessions safe.
+- **Embedding is single-threaded.** A worker pool is the obvious next step, but
+  the model hub is unreachable from this environment, so the cost it would save
+  has never been measured. Adding concurrency to an unmeasured bottleneck is how
+  you get a slower program with a lock bug in it.
 - **Journaled writes lag.** A write made while another process held the lock is
   recorded but not searchable until `memory merge`. `doctor` reports the backlog.
 - **On Windows, one writable open per process.** A LadybugDB path opened for

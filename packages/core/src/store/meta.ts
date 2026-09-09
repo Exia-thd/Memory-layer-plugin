@@ -17,6 +17,12 @@ export interface StoreMeta {
   writeSeq: number;
   /** content hash per ingested file, so a second ingest only touches what moved. */
   fileHashes?: Record<string, string>;
+  /**
+   * Which tokenizer built the postings. Indexing and querying must agree, so a
+   * store written by an older tokenizer answers keyword queries with a
+   * half-matching index and no error -- exactly the failure C4 exists to stop.
+   */
+  tokenizerVersion?: number;
   indexedAt?: string;
 }
 

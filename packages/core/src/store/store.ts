@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Database, Connection } from '@ladybugdb/core';
-import type { MemoryNode, MemoryEdge, EdgeType, Layer, StoreStats } from '../types.js';
+import type { MemoryNode, MemoryEdge, EdgeType, Layer, StoreStats, SymbolRow } from '../types.js';
 import { EDGE_TYPES } from '../types.js';
 import { ddl, SCHEMA_VERSION } from './schema.js';
 import { readMeta, writeMeta, bumpWriteSeq, type StoreMeta } from './meta.js';
@@ -474,6 +474,73 @@ export class MemoryStore {
    * also set file_path. Filtering in the database keeps this from being a reason
    * to load the whole store.
    */
+  /**
+   * Records a declaration and ties the memory chunk that is it to that name.
+   *
+   * The id is derived, not random, so re-ingesting the same file lands on the
+   * same symbol instead of accumulating duplicates.
+   */
+  async upsertSymbol(symbol: SymbolRow): Promise<void> {
+    const existing = await this.run('MATCH (s:Symbol) WHERE s.id = $id RETURN s.id AS id', {
+      id: symbol.id,
+    });
+    if (existing.length > 0) {
+      await this.run(
+        `MATCH (s:Symbol) WHERE s.id = $id
+         SET s.start_line = $startLine, s.end_line = $endLine, s.kind = $kind`,
+        { id: symbol.id, startLine: symbol.startLine, endLine: symbol.endLine, kind: symbol.kind },
+      );
+      return;
+    }
+    await this.run(
+      `CREATE (s:Symbol {
+          id: $id, name: $name, file_path: $filePath, kind: $kind,
+          start_line: $startLine, end_line: $endLine
+       })`,
+      symbol as unknown as Record<string, unknown>,
+    );
+  }
+
+  async linkAbout(memoryId: string, symbolId: string): Promise<void> {
+    const existing = await this.run(
+      'MATCH (m:Memory)-[r:ABOUT]->(s:Symbol) WHERE m.id = $m AND s.id = $s RETURN s.id AS id',
+      { m: memoryId, s: symbolId },
+    );
+    if (existing.length > 0) return;
+    await this.run(
+      `MATCH (m:Memory), (s:Symbol) WHERE m.id = $m AND s.id = $s
+       CREATE (m)-[:ABOUT {weight: 1.0, created_at: $now}]->(s)`,
+      { m: memoryId, s: symbolId, now: Date.now() },
+    );
+  }
+
+  /**
+   * Memory recorded against a named declaration.
+   *
+   * Without this, `why <symbol>` had nothing to anchor on and degraded to a text
+   * search over prose that may never mention the symbol by name.
+   */
+  async nodesAboutSymbol(name: string): Promise<MemoryNode[]> {
+    const rows = await this.run(
+      `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)
+       WHERE s.name = $name AND m.superseded_at = 0
+       RETURN ${NODE_COLUMNS}`,
+      { name },
+    );
+    return rows.map(rowToNode);
+  }
+
+  async symbolsInFile(filePath: string): Promise<SymbolRow[]> {
+    const rows = await this.run(
+      `MATCH (s:Symbol) WHERE s.file_path = $filePath
+       RETURN s.id AS id, s.name AS name, s.file_path AS filePath, s.kind AS kind,
+              s.start_line AS startLine, s.end_line AS endLine
+       ORDER BY s.start_line`,
+      { filePath },
+    );
+    return rows as unknown as SymbolRow[];
+  }
+
   async nodesAnchoredToPath(target: string): Promise<MemoryNode[]> {
     const normalized = target.replace(/\\/g, '/');
     const rows = await this.run(

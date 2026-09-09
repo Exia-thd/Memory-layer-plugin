@@ -1,9 +1,10 @@
 import fs from 'node:fs';
+import { TOKENIZER_VERSION } from '../util/tokenize.js';
 import path from 'node:path';
 import type { MemoryStore } from '../store/store.js';
 import type { Layer, MemoryNode } from '../types.js';
 import type { EmbeddingProvider } from '../embed/index.js';
-import { chunk } from './chunker.js';
+import { chunk, declarations } from './chunker.js';
 import { redact } from './redact.js';
 import { nodeId, contentHash } from '../util/ids.js';
 import { log } from '../util/log.js';
@@ -23,6 +24,8 @@ export interface IngestReport {
   created: number;
   refreshed: number;
   embedded: number;
+  /** Declarations named while chunking, and tied to the memory about them. */
+  symbols: number;
   redactions: { rule: string; count: number }[];
 }
 
@@ -51,7 +54,7 @@ export async function ingest(
   options: IngestOptions = {},
 ): Promise<IngestReport> {
   const report: IngestReport = {
-    files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, redactions: [],
+    files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, symbols: 0, redactions: [],
   };
   const redactionTotals = new Map<string, number>();
   const meta = store.getMeta();
@@ -73,11 +76,18 @@ export async function ingest(
 
     report.files += 1;
     const pieces = await chunk(file, content);
+    // Named once per file, not once per chunk: a file small enough to fit in a
+    // single chunk is never cut, and would otherwise declare nothing.
+    const declared = await declarations(file, content);
 
     // Redaction and embedding happen before the transaction opens. Both are slow,
     // and a write transaction holds the store's exclusive lock -- there is no
     // reason for an embedding round trip to block every other writer.
-    const prepared: { node: MemoryNode; vector: number[] | null }[] = [];
+    const prepared: {
+      node: MemoryNode;
+      vector: number[] | null;
+      symbols: { name: string; kind: string; startLine: number; endLine: number }[];
+    }[] = [];
 
     for (const [index, piece] of pieces.entries()) {
       // Redaction runs here, before the text reaches an embedder. Once a secret
@@ -131,7 +141,10 @@ export async function ingest(
         }
       }
 
-      prepared.push({ node, vector });
+      const covered = declared.filter(
+        (item) => item.startLine >= piece.startLine && item.startLine <= piece.endLine,
+      );
+      prepared.push({ node, vector, symbols: covered });
     }
 
     // One transaction per file, matching the granularity of fileHashes: an ingest
@@ -142,23 +155,42 @@ export async function ingest(
       let created = 0;
       let refreshed = 0;
       let embedded = 0;
+      let symbols = 0;
 
-      for (const { node, vector } of prepared) {
+      for (const { node, vector, symbols: declaredHere } of prepared) {
         const outcome = await store.upsertNode(node);
         if (outcome === 'created') created += 1;
         else refreshed += 1;
+
+        // The declaration and the memory about it land in the same transaction:
+        // a symbol with no memory, or a memory whose symbol never arrived, is a
+        // half-written graph nobody would notice.
+        for (const declaration of declaredHere) {
+          const symbolId = `Symbol:${relative}:${declaration.name}`;
+          await store.upsertSymbol({
+            id: symbolId,
+            name: declaration.name,
+            filePath: relative,
+            kind: declaration.kind,
+            startLine: declaration.startLine,
+            endLine: declaration.endLine,
+          });
+          await store.linkAbout(node.id, symbolId);
+          symbols += 1;
+        }
 
         if (vector && options.embedder && outcome === 'created') {
           await store.setEmbedding(node.id, vector, options.embedder.identity);
           embedded += 1;
         }
       }
-      return { created, refreshed, embedded };
-    }, { fileHashes: fileHash });
+      return { created, refreshed, embedded, symbols };
+    }, { fileHashes: fileHash, tokenizerVersion: TOKENIZER_VERSION });
 
     report.created += counts.created;
     report.refreshed += counts.refreshed;
     report.embedded += counts.embedded;
+    report.symbols += counts.symbols;
     fileHashes[relative] = hash;
   }
 

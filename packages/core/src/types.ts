@@ -47,6 +47,23 @@ export interface MemoryNode {
   embedding?: number[] | null;
 }
 
+/**
+ * A declaration found while chunking, and nothing more.
+ *
+ * No callers, no imports: the join this exists for is "which decision covers
+ * this function", which needs a name and a line range and stops there.
+ */
+export interface SymbolRow {
+  /** `Symbol:<file>:<name>` -- derived, so re-ingest is idempotent. */
+  id: string;
+  name: string;
+  filePath: string;
+  /** The grammar's node type, e.g. function_declaration. */
+  kind: string;
+  startLine: number;
+  endLine: number;
+}
+
 export interface MemoryEdge {
   from: string;
   to: string;

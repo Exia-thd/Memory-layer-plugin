@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { TOKENIZER_VERSION } from './util/tokenize.js';
 import path from 'node:path';
 import type { MemoryStore } from './store/store.js';
 import { pendingCount } from './store/journal.js';
@@ -127,6 +128,23 @@ export async function doctor(
           : behind > 0
             ? `${index.docCount}/${stats.nodes} nodes indexed; ${behind} are invisible to keyword search`
             : `${index.docCount.toLocaleString()} nodes indexed`,
+    });
+
+    // Postings built by one tokenizer and queried by another match on the
+    // overlap and miss the rest, silently. The version is the only way to see it.
+    const builtWith = meta.tokenizerVersion;
+    checks.push({
+      name: 'tokenizer version',
+      status:
+        stats.nodes === 0 ? 'ok' : builtWith === TOKENIZER_VERSION ? 'ok' : 'fail',
+      detail:
+        stats.nodes === 0
+          ? `v${TOKENIZER_VERSION}, no nodes indexed yet`
+          : builtWith === TOKENIZER_VERSION
+            ? `postings built with v${TOKENIZER_VERSION}`
+            : `postings built with ${builtWith === undefined ? 'an unrecorded tokenizer' : `v${builtWith}`}, ` +
+              `this build queries with v${TOKENIZER_VERSION} -- keyword results are ` +
+              'partial until `memory ingest --force` rebuilds them',
     });
 
     const orphans = await orphanCount(store);

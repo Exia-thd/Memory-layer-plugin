@@ -143,6 +143,32 @@ interface AstNode {
   type: string;
   startPosition: { row: number };
   endPosition: { row: number };
+  children?: AstNode[];
+  text?: string;
+}
+
+/** Tree-sitter grammars agree on very little; they do agree on these. */
+const NAME_TYPES = new Set([
+  'identifier', 'type_identifier', 'property_identifier', 'field_identifier',
+  'constant', 'word', 'name',
+]);
+
+/**
+ * The name a declaration declares, or null when the grammar hides it somewhere
+ * this does not look. Null is a normal answer: an anonymous default export or a
+ * destructuring declaration genuinely has no single name, and inventing one
+ * would be worse than leaving the chunk unnamed.
+ */
+function declaredName(node: AstNode): string | null {
+  const direct = (node.children ?? []).find((child) => NAME_TYPES.has(child.type));
+  if (direct?.text) return direct.text;
+
+  // `const charge = () => {}` hides the name one level down, inside the declarator.
+  for (const child of node.children ?? []) {
+    const nested = (child.children ?? []).find((inner) => NAME_TYPES.has(inner.type));
+    if (nested?.text) return nested.text;
+  }
+  return null;
 }
 
 /**
@@ -229,4 +255,54 @@ export function characterChunk(content: string, chunkSize: number, overlap: numb
   }
 
   return chunks;
+}
+
+
+/**
+ * The declarations a file makes, independent of where chunking cut it.
+ *
+ * Tying symbol capture to chunk boundaries was a mistake: a file small enough to
+ * fit in a single chunk is never cut, so it declared nothing as far as the graph
+ * was concerned -- and small files are most of a repository.
+ *
+ * Returns an empty list, never null, when the grammar is unavailable: a file the
+ * parser cannot read has no declarations *that we know of*, and the capability
+ * line already says the chunker is degraded.
+ */
+export async function declarations(
+  filePath: string,
+  content: string,
+): Promise<Declaration[]> {
+  const rule = ruleForFile(filePath);
+  if (rule.mode !== 'AST_DECLARATION') return [];
+
+  try {
+    const parser = await newParser(rule);
+    if (!parser) return [];
+    const tree = parser.parse(content) as { rootNode: { children: AstNode[] } };
+    const boundaries = new Set(rule.boundaries);
+    const found: Declaration[] = [];
+
+    for (const node of tree.rootNode.children) {
+      if (!boundaries.has(node.type)) continue;
+      const name = declaredName(node);
+      if (!name) continue;
+      found.push({
+        name,
+        kind: node.type,
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+      });
+    }
+    return found;
+  } catch {
+    return [];
+  }
+}
+
+export interface Declaration {
+  name: string;
+  kind: string;
+  startLine: number;
+  endLine: number;
 }

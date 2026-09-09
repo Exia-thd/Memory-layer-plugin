@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Capabilities, Capability } from '../types.js';
 import { probeAstChunking } from '../ingest/languages.js';
+import { TOKENIZER_SCRIPTS, TOKENIZER_VERSION } from '../util/tokenize.js';
 import { log } from '../util/log.js';
 
 /**
@@ -32,6 +33,25 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
         'by array_cosine_similarity, so cost grows with the number of embedded nodes.',
     },
     embeddings: { provider: 'unknown', status: 'unavailable', reason: 'Not probed yet.' },
+    // The third fusion branch gets a line like the other two. It is unlikely to
+    // fail, which is exactly the reasoning that left the AST chunker unwatched.
+    recency: {
+      provider: 'importance-halflife',
+      status: 'available',
+      reason: 'Ranks by importance and age; episodic memories fade, semantic ones do not.',
+    },
+    // Which scripts survive tokenization. The first tokenizer was ASCII-only and
+    // shredded every accented word without reporting anything.
+    tokenizer: {
+      provider: `unicode-fold-v${TOKENIZER_VERSION}`,
+      status: 'available',
+      version: TOKENIZER_VERSION,
+      scripts: TOKENIZER_SCRIPTS,
+      reason:
+        'Unicode letters, folded to unaccented form so an unaccented query still matches, ' +
+        'with CJK split into bigrams. English stopwords and stemming apply only to words ' +
+        'that were ASCII before folding.',
+    },
     // Ingest gets a capability line too. Anything that can be absent while the
     // system keeps working needs one -- the AST chunker was absent for its whole
     // existence, fell back to character windows, and reported nothing.

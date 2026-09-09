@@ -132,6 +132,44 @@ const TOOLS = [
     },
   },
   {
+    name: 'memory_clusters',
+    description:
+      'Groups of related memories, with the summary somebody wrote for each group ' +
+      'if one exists. Use for a broad question about an area rather than one symbol. ' +
+      'Detection only -- nothing here generates a summary.',
+    inputSchema: { type: 'object', properties: { min_size: { type: 'number' } } },
+  },
+  {
+    name: 'memory_summarize',
+    description:
+      'Record a summary you wrote for a group from memory_clusters. The body is ' +
+      'yours: this tool stores it and links it to the group members, so it survives ' +
+      'the grouping being recomputed. Read the members before writing one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cluster_id: { type: 'number' },
+        body: { type: 'string' },
+        title: { type: 'string' },
+      },
+      required: ['cluster_id', 'body'],
+    },
+  },
+  {
+    name: 'memory_changes',
+    description:
+      'What memory already records about the files this change touches. Run before ' +
+      'committing: it is the moment a change can contradict a decision someone made ' +
+      'and wrote down. Reports files with nothing recorded too, so silence is visible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['staged', 'working', 'compare'] },
+        base_ref: { type: 'string' },
+      },
+    },
+  },
+  {
     name: 'memory_conflicts',
     description:
       'Contradictions between recorded decisions that a person needs to settle. ' +
@@ -154,7 +192,7 @@ export async function serve(): Promise<void> {
 
     try {
       const payload = await dispatch(name, args);
-      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+      return { content: [{ type: 'text', text: budgeted(name, payload) }] };
     } catch (err) {
       // The error reaches the agent as an error, not as an empty result that reads
       // like "there is nothing recorded about this".
@@ -168,6 +206,69 @@ export async function serve(): Promise<void> {
   });
 
   await server.connect(new StdioServerTransport());
+}
+
+/**
+ * The point of this layer is to spend less of the agent's context, not more.
+ *
+ * A tool that answers with a megabyte of JSON has cost more than the grep it
+ * replaced. So results are capped -- and when the cap bites, the reply says so.
+ * A silently truncated list reads as a complete one, which is the whole failure
+ * this project keeps finding in other people's code.
+ */
+export const OUTPUT_BUDGET_BYTES = Number(process.env.MEMORY_LAYER_OUTPUT_BUDGET ?? 24_000);
+
+/** Arrays are trimmed before anything else: they are where the size lives. */
+export function budgeted(tool: string, payload: unknown): string {
+  const full = JSON.stringify(payload, null, 2);
+  if (full.length <= OUTPUT_BUDGET_BYTES) return full;
+
+  const trimmed = trimArrays(payload, OUTPUT_BUDGET_BYTES);
+  const text = JSON.stringify(trimmed.value, null, 2);
+  const notice =
+    `
+
+memory_truncated: ${tool} produced ${full.length} bytes, over the ` +
+    `${OUTPUT_BUDGET_BYTES}-byte budget. ${trimmed.dropped} item(s) were dropped from ` +
+    'the end of the longest list. Narrow the query, or raise MEMORY_LAYER_OUTPUT_BUDGET.';
+  return text + notice;
+}
+
+function trimArrays(payload: unknown, budget: number): { value: unknown; dropped: number } {
+  if (Array.isArray(payload)) {
+    const kept: unknown[] = [];
+    let size = 2;
+    for (const item of payload) {
+      const piece = JSON.stringify(item, null, 2)?.length ?? 0;
+      if (size + piece > budget && kept.length > 0) break;
+      kept.push(item);
+      size += piece + 2;
+    }
+    return { value: kept, dropped: payload.length - kept.length };
+  }
+
+  if (payload && typeof payload === 'object') {
+    const entries = Object.entries(payload as Record<string, unknown>);
+    // Spend the budget on the longest array; the scalar fields around it are
+    // the part the agent needs to interpret whatever is left.
+    const longest = entries
+      .filter(([, value]) => Array.isArray(value))
+      .sort((a, b) => (b[1] as unknown[]).length - (a[1] as unknown[]).length)[0];
+    if (!longest) return { value: payload, dropped: 0 };
+
+    const others = JSON.stringify(
+      Object.fromEntries(entries.filter(([key]) => key !== longest[0])),
+      null,
+      2,
+    ).length;
+    const trimmed = trimArrays(longest[1], Math.max(budget - others, 512));
+    return {
+      value: { ...(payload as Record<string, unknown>), [longest[0]]: trimmed.value },
+      dropped: trimmed.dropped,
+    };
+  }
+
+  return { value: payload, dropped: 0 };
 }
 
 async function dispatch(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -234,6 +335,24 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
 
     case 'memory_constraints':
       return { constraints: await api.runConstraints({ limit: numeric(args.limit) }) };
+
+    case 'memory_clusters':
+      return { clusters: await api.runClusters() };
+
+    case 'memory_summarize': {
+      if (typeof args.cluster_id !== 'number' || typeof args.body !== 'string') {
+        throw new Error('memory_summarize needs cluster_id and body.');
+      }
+      return await api.runSummarize(args.cluster_id, args.body, {
+        title: args.title as string | undefined,
+      });
+    }
+
+    case 'memory_changes':
+      return await api.runChanges({
+        scope: args.scope as 'staged' | 'working' | 'compare' | undefined,
+        baseRef: args.base_ref as string | undefined,
+      });
 
     case 'memory_conflicts':
       return { conflicts: await api.runConflicts() };

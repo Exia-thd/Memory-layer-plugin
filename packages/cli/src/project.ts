@@ -30,6 +30,40 @@ function git(args: string[], cwd: string): string | null {
   }
 }
 
+/**
+ * Which files the working tree has changed, relative to the repository root.
+ *
+ * Three scopes, because the useful question changes with the moment: what is
+ * about to be committed, everything touched since the last commit, or how this
+ * branch differs from where it started.
+ */
+export function changedFiles(root: string, scope: 'staged' | 'working' | 'compare', baseRef?: string): string[] | null {
+  const args =
+    scope === 'staged'
+      ? ['diff', '--cached', '--name-only', '--diff-filter=ACMR']
+      : scope === 'compare'
+        ? ['diff', '--name-only', '--diff-filter=ACMR', `${baseRef ?? 'HEAD'}...HEAD`]
+        : ['diff', '--name-only', '--diff-filter=ACMR', 'HEAD'];
+
+  const out = git(args, root);
+  // null means git itself failed -- an unborn branch, a bad ref, not a repo.
+  // That is not the same as "nothing changed", and the caller must not read it
+  // as an all-clear.
+  if (out === null) return null;
+
+  const tracked = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (scope !== 'working') return unique(tracked);
+
+  // Untracked files carry no history, so a decision recorded against one is the
+  // only record that exists. Leaving them out is exactly the wrong bias.
+  const untracked = git(['ls-files', '--others', '--exclude-standard'], root) ?? '';
+  return unique([...tracked, ...untracked.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)]);
+}
+
+function unique(items: string[]): string[] {
+  return [...new Set(items)].sort();
+}
+
 /** Resolves the project from a directory, refusing to guess when it is not a repo. */
 export function resolveProject(from: string = process.cwd()): ProjectInfo {
   const root = git(['rev-parse', '--show-toplevel'], from);

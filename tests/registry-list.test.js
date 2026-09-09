@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { SCHEMA_VERSION } from '@memory-layer/core';
 import { makeRepo, cli, cliRaw } from './helpers.js';
 
 /**
@@ -31,7 +32,10 @@ function fakeProject(root, name) {
   fs.writeFileSync(
     path.join(store, 'meta.json'),
     JSON.stringify({
-      projectName: name, projectRoot: dir, schemaVersion: 3, dimensions: 384,
+      // Read the constant rather than pinning a number: this test is about a
+      // registry surviving broken entries, and a hardcoded version made it fail
+      // for an unrelated schema bump.
+      projectName: name, projectRoot: dir, schemaVersion: SCHEMA_VERSION, dimensions: 384,
       embedding: null, writeSeq: 0, lastCommit: head,
     }),
   );

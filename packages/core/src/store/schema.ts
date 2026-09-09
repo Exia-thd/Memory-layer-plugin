@@ -4,7 +4,7 @@ import { EDGE_TYPES } from '../types.js';
  * Bumped whenever the DDL below changes shape. `doctor` compares it against the
  * value recorded in meta.json and refuses to guess.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Vector width is a schema decision, not a runtime setting: it is baked into the
@@ -84,6 +84,27 @@ export function ddl(dimensions: number): string[] {
         doc_count INT64,
         total_length INT64,
         PRIMARY KEY(id)
+     )`,
+  );
+
+  // The smallest code graph that earns its place: what a file declares, and
+  // which memory is about it. Deliberately no CALLS or IMPORTS -- cross-file
+  // resolution is a different project with a different lifecycle, and the join
+  // this needs is "which decision covers this function", not "what calls what".
+  statements.push(
+    `CREATE NODE TABLE IF NOT EXISTS Symbol(
+        id STRING,
+        name STRING,
+        file_path STRING,
+        kind STRING,
+        start_line INT64,
+        end_line INT64,
+        PRIMARY KEY(id)
+     )`,
+    `CREATE REL TABLE IF NOT EXISTS ABOUT(
+        FROM Memory TO Symbol,
+        weight DOUBLE,
+        created_at INT64
      )`,
   );
 

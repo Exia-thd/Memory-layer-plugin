@@ -23,6 +23,9 @@ const USAGE = `memory - project memory layer
   memory get <id> [--json]            one node plus its direct edges
   memory graph <id> [--depth N] [--edge TYPE] [--json]
   memory constraints [--limit N]      decisions in force, most important first
+  memory changes [--scope S] [--base R]  what memory records about your changed files
+  memory session start <label> | end [--summary S] | (none)   open, close or show the session
+  memory summarize <clusterId> --body S   record a summary for a group of memories
   memory conflicts [--json]           contradictions needing a person
   memory clusters [--json]            communities in the memory graph
   memory write --layer L --title T --body B --source-ref R [--link ID:TYPE]
@@ -203,6 +206,50 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
 
+    case 'session': {
+      const [action, ...rest] = args.positional;
+      if (action === 'start') {
+        const label = rest.join(' ') || 'untitled';
+        const started = await api.runSessionStart(label);
+        emit(args, started, () => `session ${started.label} open (${started.id})`);
+        return 0;
+      }
+      if (action === 'end') {
+        const closed = await api.runSessionEnd({ summary: stringFlag(args, 'summary') });
+        emit(args, closed, () => (closed.closed ? `session closed (${closed.closed})` : 'no session open'));
+        return 0;
+      }
+      const open = api.currentSession(storeDirOrThrow());
+      emit(args, { open }, () => (open ? `${open.label} (${open.id})` : 'no session open'));
+      return 0;
+    }
+
+    case 'changes': {
+      const scope = (stringFlag(args, 'scope') ?? 'staged') as 'staged' | 'working' | 'compare';
+      const report = await api.runChanges({ scope, baseRef: stringFlag(args, 'base') });
+      emit(args, report, () => {
+        if (report.changed.length === 0) return `no ${report.scope} changes`;
+        const lines: string[] = [];
+        for (const entry of report.covered) {
+          lines.push(entry.file);
+          for (const memory of entry.memories) {
+            const mark = memory.contested ? ' [CONTESTED]' : '';
+            lines.push(`    [${memory.layer}] ${memory.title}${mark}`);
+            lines.push(`        ${memory.sourceRef}`);
+          }
+        }
+        if (report.uncovered.length > 0) {
+          lines.push(`${report.uncovered.length} changed file(s) with nothing recorded:`);
+          for (const file of report.uncovered) lines.push(`    ${file}`);
+        }
+        if (report.contested > 0) {
+          lines.push(`${report.contested} of these memories are contested -- settle them before committing.`);
+        }
+        return lines.join('\n');
+      });
+      return 0;
+    }
+
     case 'conflicts': {
       const found = await api.runConflicts();
       emit(args, found, () =>
@@ -222,6 +269,15 @@ async function main(argv: string[]): Promise<number> {
               .map((c) => `#${c.id} (${c.size}) ${c.terms.join(' ')}\n${c.representatives.map((r) => `    ${r.title}`).join('\n')}`)
               .join('\n'),
       );
+      return 0;
+    }
+
+    case 'summarize': {
+      const [rawId] = args.positional;
+      const body = stringFlag(args, 'body');
+      if (!rawId || !body) throw new Error('summarize needs <clusterId> and --body');
+      const result = await api.runSummarize(Number(rawId), body, { title: stringFlag(args, 'title') });
+      emit(args, result, () => `summary ${result.id} covers ${result.covers} memories`);
       return 0;
     }
 

@@ -1,5 +1,5 @@
 {
-  "description": "Loads active constraints at session start, and offers memory context when the agent reaches for raw search.",
+  "description": "Loads active constraints at session start, offers memory context when the agent reaches for raw search, and checks a commit against what memory already records.",
   "hooks": {
     "SessionStart": [
       {
@@ -14,6 +14,17 @@
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-hook.mjs\" pre-commit",
+            "statusMessage": "Checking memory against the staged change..."
+          }
+        ]
+      },
       {
         "matcher": "Read|Grep|Glob",
         "hooks": [

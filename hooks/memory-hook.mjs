@@ -35,6 +35,10 @@ try {
     case 'session-start':
       await sessionStart(cwd);
       break;
+    case 'pre-commit':
+      await preCommit(cwd, payload);
+      break;
+
     case 'pre-tool':
       await preTool(cwd, payload);
       break;
@@ -99,6 +103,46 @@ async function preTool(cwd, payload) {
     lines.push(`- [${hit.layer}] ${hit.title} (${hit.sourceRef})${hit.stale ? ' (recorded a while ago)' : ''}`);
   }
   lines.push('Call memory_why for the full reasoning before changing this.');
+
+  emit({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      additionalContext: lines.join('\n'),
+    },
+  });
+}
+
+/**
+ * The one moment memory is worth the most.
+ *
+ * Not while exploring -- just before a change lands that may contradict a
+ * decision somebody already made and wrote down. This fires on the `git commit`
+ * itself, so it does not depend on the agent remembering that `memory changes`
+ * exists.
+ */
+async function preCommit(cwd, payload) {
+  const command = String(payload?.tool_input?.command ?? '');
+  if (!/\bgit\b[^\n]*\bcommit\b/.test(command)) return;
+
+  const report = await runCli(cwd, ['changes', '--scope', 'staged', '--json']);
+  if (!report || report.covered?.length === 0) return;
+
+  const lines = ['Project memory covers files in this commit:'];
+  for (const entry of report.covered ?? []) {
+    lines.push(`  ${entry.file}`);
+    for (const memory of entry.memories.slice(0, 3)) {
+      lines.push(`    - [${memory.layer}] ${memory.title}${memory.contested ? ' (CONTESTED)' : ''}`);
+    }
+  }
+  if (report.contested > 0) {
+    lines.push(
+      `${report.contested} of these are contested. A person settles a contradiction, not the agent -- ` +
+        'surface it before committing.',
+    );
+  }
+  if ((report.uncovered ?? []).length > 0) {
+    lines.push(`${report.uncovered.length} changed file(s) have nothing recorded.`);
+  }
 
   emit({
     hookSpecificOutput: {

@@ -27,14 +27,25 @@ export interface Cluster {
   representatives: { id: string; title: string; layer: string }[];
   /** Terms that occur across the cluster, as a rough label. */
   terms: string[];
+  /** Every member, so a summary can be anchored to the set rather than the id. */
+  memberIds: string[];
+  /**
+   * A summary somebody wrote for this group, if one exists.
+   *
+   * Community ids come out of Louvain and change between runs, so a summary is
+   * never stored against an id. It is stored as an ordinary memory linked to
+   * the members it came from, and rediscovered here by that link.
+   */
+  summary?: { id: string; title: string; body: string; covers: number };
 }
 
 /**
- * Community detection over the memory graph.
+ * Community detection over the memory graph, plus any summary already written.
  *
- * Clusters are computed and returned raw. There is no summarisation step, so this
- * is community detection and is named as such -- calling it GraphRAG without the
- * summarisation stage would be claiming a capability that is not here.
+ * Detection itself stays raw: nothing here writes a summary, and nothing calls
+ * an LLM. What it does is find a summary a person or an agent wrote earlier and
+ * linked to the members, so the group can answer a broad question without a
+ * generation step hiding inside a read path.
  */
 export async function clusters(store: MemoryStore, options: { minSize?: number } = {}): Promise<Cluster[]> {
   const minSize = options.minSize ?? 2;
@@ -67,6 +78,7 @@ export async function clusters(store: MemoryStore, options: { minSize?: number }
   for (const [id, members] of byCommunity) {
     if (members.length < minSize) continue;
     const ranked = [...members].sort((a, b) => b.importance - a.importance);
+    const memberIds = members.map((node) => node.id);
     result.push({
       id,
       size: members.length,
@@ -76,6 +88,8 @@ export async function clusters(store: MemoryStore, options: { minSize?: number }
         layer: node.layer,
       })),
       terms: commonTerms(members),
+      memberIds,
+      summary: findSummary(nodes, edges, memberIds),
     });
   }
 
@@ -98,4 +112,39 @@ function commonTerms(nodes: MemoryNode[], count = 6): string[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, count)
     .map(([word]) => word);
+}
+
+
+/**
+ * A memory that derives from at least two members of this group.
+ *
+ * Two rather than one: a note derived from a single memory is a comment on that
+ * memory, not a summary of the group around it.
+ */
+function findSummary(
+  nodes: MemoryNode[],
+  edges: { from: string; to: string; type: string }[],
+  memberIds: string[],
+): Cluster['summary'] {
+  const members = new Set(memberIds);
+  const coverage = new Map<string, number>();
+  for (const edge of edges) {
+    if (edge.type !== 'DERIVED_FROM') continue;
+    if (!members.has(edge.to) || edge.from === edge.to) continue;
+    // The summary is usually inside the group it summarises: linking it to every
+    // member is exactly what makes the community detector put it there. Excluding
+    // members as authors therefore excluded every real summary.
+    coverage.set(edge.from, (coverage.get(edge.from) ?? 0) + 1);
+  }
+
+  let best: { id: string; covers: number } | null = null;
+  for (const [id, covers] of coverage) {
+    if (covers < 2) continue;
+    if (!best || covers > best.covers) best = { id, covers };
+  }
+  if (!best) return undefined;
+
+  const node = nodes.find((candidate) => candidate.id === best.id);
+  if (!node) return undefined;
+  return { id: node.id, title: node.title, body: node.body, covers: best.covers };
 }

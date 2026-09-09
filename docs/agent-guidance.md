@@ -14,6 +14,9 @@ behind the user's back is exactly the kind of thing a memory layer should not do
 - **MUST check memory_conflicts before recording a new decision.** Two live
   decisions covering the same ground, neither aware of the other, is the failure
   this layer exists to catch.
+- **MUST run memory_changes before committing.** It is the one moment memory is
+  worth the most: just before a change lands that may contradict a decision
+  somebody already made and wrote down.
 - **MUST cite the source_ref** of anything memory returned when acting on it.
 - **MUST record the alternative** when writing a decision. "Capped at two" is a
   setting; "capped at two, chosen over backoff because the processor counts

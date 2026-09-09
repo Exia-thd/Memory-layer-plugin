@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import nodePath from 'node:path';
 import {
   MemoryStore, StoreLockedError, ingest, search, neighbors, clusters, conflicts, doctor,
   probeCapabilities, selectProvider, parseDimensions, upsertProject, journal,
@@ -7,7 +9,7 @@ import {
 } from '@memory-layer/core';
 import {
   resolveProject, storeDirFor, ensureGitignore, storeDirOrThrow, isStale, isStaleAsync,
-  mapWithLimit, type Staleness,
+  mapWithLimit, changedFiles, type Staleness,
 } from './project.js';
 import { readRegistry, type RegistryEntry } from '@memory-layer/core';
 
@@ -159,9 +161,13 @@ export async function runWhy(
     // Anchor on provenance first, filtered in the database rather than by reading
     // every node. A path anchors on file_path or source_ref; a bare symbol has
     // neither, so it falls through to the text branches below.
+    // A path anchors on provenance; a bare name anchors on the declaration the
+    // chunker recorded. Before symbols existed the second case had nothing to
+    // hold on to and quietly became a text search over prose that may never
+    // mention the symbol.
     const anchored = looksLikePath(target)
       ? await store.nodesAnchoredToPath(target)
-      : [];
+      : await store.nodesAboutSymbol(target);
 
     // Then widen by wording, so a symbol name works as well as a path.
     const found = await search(store, target.replace(/[/_.\\-]+/g, ' '), provider, {
@@ -195,7 +201,7 @@ export async function runWhy(
       found.fusion.degraded.push('anchor');
       found.fusion.reasons.anchor = looksLikePath(target)
         ? `No memory is recorded against ${target}.`
-        : `${target} is not a path, so nothing could be anchored; this is a text search.`;
+        : `No declaration named ${target} carries recorded memory; this is a text search.`;
     }
 
     return { ...found, anchoredTo: target };
@@ -245,6 +251,72 @@ export interface WriteInput {
  * written but not yet searchable is a different outcome from one that is live,
  * and the difference matters to whoever wrote it.
  */
+/**
+ * The open session, if any, so a memory written now can say when it happened.
+ *
+ * `OCCURRED_IN` existed as an edge label from the start with nothing that could
+ * ever create one -- the same shape as an edge type declared in a schema and
+ * never produced, which is how a graph ends up with nodes and no relationships.
+ * A session node is the missing producer.
+ */
+function sessionPath(storeDir: string): string {
+  return nodePath.join(storeDir, 'session.json');
+}
+
+export function currentSession(storeDir: string): { id: string; label: string; startedAt: number } | null {
+  try {
+    const raw = fs.readFileSync(sessionPath(storeDir), 'utf8');
+    const parsed = JSON.parse(raw) as { id: string; label: string; startedAt: number };
+    return parsed.id ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function runSessionStart(
+  label: string,
+  options: { from?: string } = {},
+): Promise<{ id: string; label: string }> {
+  const storeDir = storeDirOrThrow(options.from);
+  const startedAt = Date.now();
+  const written = await runWrite(
+    {
+      layer: 'episodic',
+      title: `Session: ${label}`,
+      body: `Work session "${label}" opened at ${new Date(startedAt).toISOString()}.`,
+      sourceRef: `session://${startedAt}`,
+      importance: 2,
+    },
+    options,
+  );
+  fs.writeFileSync(sessionPath(storeDir), JSON.stringify({ id: written.id, label, startedAt }, null, 2));
+  return { id: written.id, label };
+}
+
+export async function runSessionEnd(
+  options: { from?: string; summary?: string } = {},
+): Promise<{ closed: string | null }> {
+  const storeDir = storeDirOrThrow(options.from);
+  const open = currentSession(storeDir);
+  if (!open) return { closed: null };
+
+  if (options.summary) {
+    await runWrite(
+      {
+        layer: 'episodic',
+        title: `Session outcome: ${open.label}`,
+        body: options.summary,
+        sourceRef: `session://${open.startedAt}#outcome`,
+        importance: 4,
+        links: [{ to: open.id, type: 'OCCURRED_IN' as EdgeType, weight: 1 }],
+      },
+      options,
+    );
+  }
+  fs.rmSync(sessionPath(storeDir), { force: true });
+  return { closed: open.id };
+}
+
 export async function runWrite(
   input: WriteInput,
   options: { from?: string } = {},
@@ -293,7 +365,7 @@ export async function runWrite(
       await store!.upsertNode(node);
       if (vector && provider) await store!.setEmbedding(node.id, vector, provider.identity);
 
-      for (const link of input.links ?? []) {
+      for (const link of sessionLinks(storeDir, node, input.links)) {
         await store!.addEdge({
           from: node.id,
           to: link.to,
@@ -309,7 +381,7 @@ export async function runWrite(
   } catch (err) {
     if (!(err instanceof StoreLockedError)) throw err;
     journal.appendNode(storeDir, node);
-    for (const link of input.links ?? []) {
+    for (const link of sessionLinks(storeDir, node, input.links)) {
       journal.appendEdge(storeDir, {
         from: node.id, to: link.to, type: link.type,
         weight: link.weight ?? 1, createdAt: now, evidenceRef: null,
@@ -435,6 +507,95 @@ export async function runConstraints(
   }
 }
 
+export interface ChangedFileMemory {
+  file: string;
+  /** Decisions, constraints and events recorded against this file. */
+  memories: Array<{
+    id: string;
+    layer: Layer;
+    title: string;
+    sourceRef: string;
+    importance: number;
+    /** True when this node is one side of an unresolved CONTRADICTS pair. */
+    contested: boolean;
+  }>;
+}
+
+export interface ChangesReport {
+  scope: 'staged' | 'working' | 'compare';
+  baseRef?: string;
+  /** Files the diff touched, whether or not memory knows anything about them. */
+  changed: string[];
+  /** Only the files memory has something to say about. */
+  covered: ChangedFileMemory[];
+  /** Files with nothing recorded -- reported so silence is visible, not implied. */
+  uncovered: string[];
+  contested: number;
+}
+
+/**
+ * What memory knows about the code you are about to commit.
+ *
+ * This is the moment memory is worth the most: not while exploring, but just
+ * before a change lands that may contradict a decision someone already made and
+ * wrote down. `uncovered` is reported alongside `covered` because "memory found
+ * nothing" and "memory was never asked" look identical otherwise.
+ */
+export async function runChanges(
+  options: { from?: string; scope?: 'staged' | 'working' | 'compare'; baseRef?: string } = {},
+): Promise<ChangesReport> {
+  const project = resolveProject(options.from);
+  const scope = options.scope ?? 'staged';
+  const files = changedFiles(project.root, scope, options.baseRef);
+  if (files === null) {
+    throw new Error(
+      `Could not read ${scope} changes from git in ${project.root}. ` +
+        'An unborn branch or a bad base ref reports no changes, which would read as "nothing to check".',
+    );
+  }
+
+  const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
+  try {
+    const contestedIds = new Set<string>();
+    for (const conflict of await conflicts(store)) {
+      contestedIds.add(conflict.a.id);
+      contestedIds.add(conflict.b.id);
+    }
+
+    const covered: ChangedFileMemory[] = [];
+    const uncovered: string[] = [];
+
+    for (const file of files) {
+      const nodes = await store.nodesAnchoredToPath(file);
+      if (nodes.length === 0) {
+        uncovered.push(file);
+        continue;
+      }
+      covered.push({
+        file,
+        memories: nodes
+          .sort((a, b) => rank(a) - rank(b) || b.importance - a.importance)
+          .map((node) => ({
+            id: node.id,
+            layer: node.layer,
+            title: node.title,
+            sourceRef: node.sourceRef,
+            importance: node.importance,
+            contested: contestedIds.has(node.id),
+          })),
+      });
+    }
+
+    const contested = covered.reduce(
+      (total, entry) => total + entry.memories.filter((memory) => memory.contested).length,
+      0,
+    );
+    return { scope, baseRef: options.baseRef, changed: files, covered, uncovered, contested };
+  } finally {
+    await store.close();
+  }
+}
+
 export async function runConflicts(options: { from?: string } = {}): Promise<Conflict[]> {
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
@@ -451,6 +612,45 @@ export async function runClusters(options: { from?: string } = {}): Promise<Clus
   } finally {
     await store.close();
   }
+}
+
+/**
+ * Records a summary somebody wrote for a group of memories.
+ *
+ * This is the summarisation stage, and it is deliberately not automatic: the
+ * body comes from the caller. Nothing here calls a model, so a read path can
+ * never quietly become a generation path -- and the summary is linked to the
+ * members, not to a community id that changes on the next run.
+ */
+export async function runSummarize(
+  clusterId: number,
+  body: string,
+  options: { from?: string; title?: string } = {},
+): Promise<{ id: string; covers: number }> {
+  if (!body.trim()) throw new Error('A summary needs a body; an empty one is worse than none.');
+
+  const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
+  let found: Cluster | undefined;
+  try {
+    found = (await clusters(store)).find((cluster) => cluster.id === clusterId);
+  } finally {
+    await store.close();
+  }
+  if (!found) throw new Error(`No cluster ${clusterId} in the current grouping. Run \`memory clusters\` first.`);
+
+  const title = options.title ?? `Area: ${found.terms.slice(0, 3).join(', ') || `cluster ${clusterId}`}`;
+  const written = await runWrite(
+    {
+      layer: 'semantic',
+      title,
+      body,
+      sourceRef: `cluster://${found.memberIds.length}-members`,
+      importance: 6,
+      links: found.memberIds.map((id) => ({ to: id, type: 'DERIVED_FROM' as EdgeType, weight: 1 })),
+    },
+    options,
+  );
+  return { id: written.id, covers: found.memberIds.length };
 }
 
 export async function runDoctor(options: { from?: string } = {}): Promise<DoctorReport & { stale: ReturnType<typeof isStale> }> {
@@ -507,4 +707,23 @@ export async function runEmbed(options: { from?: string; force?: boolean } = {})
 
 async function writable(from?: string): Promise<MemoryStore> {
   return new MemoryStore(storeDirOrThrow(from));
+}
+
+/**
+ * The caller's links, plus the open session when there is one.
+ *
+ * A session node does not occur in itself, so it is excluded by source_ref.
+ */
+function sessionLinks(
+  storeDir: string,
+  node: MemoryNode,
+  links: WriteInput['links'],
+): NonNullable<WriteInput['links']> {
+  const explicit = links ?? [];
+  if (node.sourceRef.startsWith('session://')) return explicit;
+
+  const open = currentSession(storeDir);
+  if (!open) return explicit;
+  if (explicit.some((link) => link.to === open.id)) return explicit;
+  return [...explicit, { to: open.id, type: 'OCCURRED_IN' as EdgeType, weight: 1 }];
 }
