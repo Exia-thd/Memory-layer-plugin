@@ -93,7 +93,16 @@ export async function ingest(
       }
 
       const layer = options.layer ?? 'artifact';
-      const title = titleFor(piece.headingPath, relative, index, pieces.length);
+      // The title is derived from a heading or a path, and both are authored
+      // text that can carry a secret. It is embedded alongside the body and
+      // indexed for keyword search, so it goes through redaction on the same
+      // terms -- as `write` already does for the title it is handed.
+      const { text: title, redactions: titleRedactions } = redact(
+        titleFor(piece.headingPath, relative, index, pieces.length),
+      );
+      for (const entry of titleRedactions) {
+        redactionTotals.set(entry.rule, (redactionTotals.get(entry.rule) ?? 0) + entry.count);
+      }
       const now = Date.now();
       const node: MemoryNode = {
         id: nodeId(layer, sourceRef, text),

@@ -51,7 +51,10 @@ export async function init(options: InitOptions = {}): Promise<{ storeDir: strin
     cachedProvider = choice;
   }
 
-  await MemoryStore.create(dir, {
+  // The store stays open from here to the end of init. A LadybugDB path opened
+  // once in a process cannot be opened a second time in it, so doctor has to run
+  // on this handle rather than on one of its own.
+  const store = await MemoryStore.create(dir, {
     projectName: project.name,
     projectRoot: project.root,
     remoteUrl: project.remoteUrl,
@@ -73,7 +76,6 @@ export async function init(options: InitOptions = {}): Promise<{ storeDir: strin
     indexedAt: new Date().toISOString(),
   });
 
-  const store = new MemoryStore(dir);
   const report = await doctor(store, choice?.provider.identity ?? null);
   await store.close();
   return { storeDir: dir, report };

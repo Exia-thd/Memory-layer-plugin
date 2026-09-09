@@ -50,7 +50,11 @@ test('paths that name the same place produce the same key', () => {
   assert.ok(samePath('C:/Users/x/repo/', 'c:\\users\\..\\Users\\x\\repo'));
   assert.equal(canonicalizePath('C:\\Users\\x'), 'C:/Users/x');
 
-  assert.equal(canonicalizePath('/a/b/../c'), '/a/c');
+  // `..` is resolved rather than carried. The first segment here is a single
+  // letter, so on Windows the MSYS rewrite claims it as a drive -- the tradeoff
+  // canonicalizePath documents and accepts, and the reason this expectation is
+  // platform-dependent in the same way the one below is.
+  assert.equal(canonicalizePath('/a/b/../c'), process.platform === 'win32' ? 'A:/c' : '/a/c');
   assert.notEqual(canonicalizePath('/a/b'), canonicalizePath('/a/c'));
 
   // A POSIX directory whose first segment is one letter is not a drive.
