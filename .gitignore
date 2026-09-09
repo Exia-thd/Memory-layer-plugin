@@ -4,3 +4,7 @@ dist/
 .memory/
 .DS_Store
 scratchpad/
+
+# Model weights: cached at runtime, never committed.
+mlcache/
+models/
