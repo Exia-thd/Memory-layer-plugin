@@ -216,10 +216,21 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
       };
     }
 
-    case 'memory_link':
-      return api.runLink(String(args.from ?? ''), String(args.to ?? ''), args.type as EdgeType, {
+    case 'memory_link': {
+      const result = await api.runLink(String(args.from ?? ''), String(args.to ?? ''), args.type as EdgeType, {
         weight: numeric(args.weight),
       });
+      // Reported the way memory_write reports it. An edge that went to the
+      // journal is recorded but not yet traversable, and saying so is the
+      // difference between a queued write and one the caller thinks landed.
+      return {
+        ...result,
+        note: result.queued
+          ? 'Another process held the write lock, so this edge was queued to the session journal. ' +
+            'It is recorded but will not be traversable until `memory merge` runs.'
+          : undefined,
+      };
+    }
 
     case 'memory_constraints':
       return { constraints: await api.runConstraints({ limit: numeric(args.limit) }) };
