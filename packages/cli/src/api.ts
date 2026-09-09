@@ -519,6 +519,8 @@ export interface ChangedFileMemory {
     /** True when this node is one side of an unresolved CONTRADICTS pair. */
     contested: boolean;
   }>;
+  /** Memories that matched but were not listed, so the cut is visible. */
+  omitted: number;
 }
 
 export interface ChangesReport {
@@ -542,9 +544,15 @@ export interface ChangesReport {
  * nothing" and "memory was never asked" look identical otherwise.
  */
 export async function runChanges(
-  options: { from?: string; scope?: 'staged' | 'working' | 'compare'; baseRef?: string } = {},
+  options: {
+    from?: string;
+    scope?: 'staged' | 'working' | 'compare';
+    baseRef?: string;
+    perFile?: number;
+  } = {},
 ): Promise<ChangesReport> {
   const project = resolveProject(options.from);
+  const perFile = options.perFile ?? 5;
   const scope = options.scope ?? 'staged';
   const files = changedFiles(project.root, scope, options.baseRef);
   if (files === null) {
@@ -571,18 +579,26 @@ export async function runChanges(
         uncovered.push(file);
         continue;
       }
+      // Decisions first, then the chunks of the file itself. A commit check that
+      // lists fourteen artifact fragments per file floods the context this layer
+      // exists to protect -- and buries the one recorded decision that matters.
+      const ranked = nodes.sort(
+        (a, b) => rank(a) - rank(b) || b.importance - a.importance,
+      );
+      const reasoning = ranked.filter((node) => node.layer !== 'artifact');
+      const shown = (reasoning.length > 0 ? reasoning : ranked).slice(0, perFile);
+
       covered.push({
         file,
-        memories: nodes
-          .sort((a, b) => rank(a) - rank(b) || b.importance - a.importance)
-          .map((node) => ({
-            id: node.id,
-            layer: node.layer,
-            title: node.title,
-            sourceRef: node.sourceRef,
-            importance: node.importance,
-            contested: contestedIds.has(node.id),
-          })),
+        memories: shown.map((node) => ({
+          id: node.id,
+          layer: node.layer,
+          title: node.title,
+          sourceRef: node.sourceRef,
+          importance: node.importance,
+          contested: contestedIds.has(node.id),
+        })),
+        omitted: nodes.length - shown.length,
       });
     }
 

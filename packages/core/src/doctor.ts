@@ -147,11 +147,15 @@ export async function doctor(
               'partial until `memory ingest --force` rebuilds them',
     });
 
-    const orphans = await orphanCount(store);
+    const orphans = await store.orphanedMemories();
     checks.push({
       name: 'orphans',
       status: orphans > 0 ? 'warn' : 'ok',
-      detail: orphans > 0 ? `${orphans} nodes with no edges` : 'every node is connected',
+      detail:
+        orphans > 0
+          ? `${orphans} recorded memor${orphans === 1 ? 'y' : 'ies'} connect to nothing -- ` +
+            'a decision with no link to what it constrains is hard to find later'
+          : 'every recorded memory is connected',
     });
   }
 

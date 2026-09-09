@@ -541,6 +541,28 @@ export class MemoryStore {
     return rows as unknown as SymbolRow[];
   }
 
+  /**
+   * Recorded memories that connect to nothing at all.
+   *
+   * Counted in the database and across *every* relationship type, including
+   * ABOUT. Walking only the memory-to-memory labels made `doctor` report "259
+   * edges" and "486 nodes with no edges" in the same breath.
+   *
+   * Artifact chunks are excluded: an ingested paragraph standing on its own is
+   * the normal case, and a warning that fires on every fresh ingest teaches
+   * people to stop reading warnings.
+   */
+  async orphanedMemories(): Promise<number> {
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.layer <> 'artifact' AND m.superseded_at = 0
+         AND NOT EXISTS { MATCH (m)-[]-() }
+       RETURN count(*) AS n`,
+      {},
+    );
+    return Number((rows[0] as { n?: number })?.n ?? 0);
+  }
+
   async nodesAnchoredToPath(target: string): Promise<MemoryNode[]> {
     const normalized = target.replace(/\\/g, '/');
     const rows = await this.run(

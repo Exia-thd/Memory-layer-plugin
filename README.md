@@ -218,6 +218,14 @@ semantic ones do not. Decay demotes; it does not remove.
   keeping every write a short-lived process. `memory ingest` is already
   incremental through `fileHashes`; a watcher would buy convenience at the cost
   of the property that makes concurrent sessions safe.
+- **Clustering uses Louvain, not Leiden.** Louvain can produce a community that
+  is internally disconnected; Leiden fixes that and is what comparable tools
+  use. It has not bitten a real store yet, and swapping it is a dependency
+  change nobody has needed.
+- **The web target does not exist.** Sigma.js, the React front end and the
+  LangChain agent are all unbuilt: the plan said not to start them before the
+  CLI was finished, and that still holds. Visualisation is easy to build and
+  easy to mistake for progress.
 - **Embedding is single-threaded.** A worker pool is the obvious next step, but
   the model hub is unreachable from this environment, so the cost it would save
   has never been measured. Adding concurrency to an unmeasured bottleneck is how

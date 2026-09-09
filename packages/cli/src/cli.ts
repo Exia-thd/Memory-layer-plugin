@@ -237,6 +237,9 @@ async function main(argv: string[]): Promise<number> {
             lines.push(`    [${memory.layer}] ${memory.title}${mark}`);
             lines.push(`        ${memory.sourceRef}`);
           }
+          if (entry.omitted > 0) {
+            lines.push(`    ... and ${entry.omitted} more, not shown`);
+          }
         }
         if (report.uncovered.length > 0) {
           lines.push(`${report.uncovered.length} changed file(s) with nothing recorded:`);

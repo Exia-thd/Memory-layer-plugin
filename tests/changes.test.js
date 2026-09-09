@@ -69,6 +69,44 @@ test('files with nothing recorded are reported, not omitted', async () => {
   }
 });
 
+test('a flood of chunks is capped, and the cut is stated', async () => {
+  // A commit check that lists every chunk of a changed file floods the context
+  // this layer exists to protect, and buries the one decision that matters.
+  const filler = 'Nội dung dài để vượt ngưỡng một chunk duy nhất. '.repeat(6);
+  const many = Array.from({ length: 40 }, (_, i) => `## Mục ${i}\n\n${filler} ${i}.\n`).join('\n');
+  const repo = makeRepo({ 'docs/long.md': `# Dài\n\n${many}` });
+  try {
+    cli(repo, ['init']);
+    cli(repo, ['ingest', 'docs/long.md']);
+    fs.appendFileSync(path.join(repo.dir, 'docs/long.md'), '\nthêm.\n');
+    git(repo, ['add', 'docs/long.md']);
+
+    const report = JSON.parse(cli(repo, ['changes', '--json']));
+    const entry = report.covered[0];
+    assert.ok(entry.memories.length <= 5, `listed ${entry.memories.length} memories`);
+    assert.ok(entry.omitted > 0, 'a cut happened but was not reported');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a recorded decision outranks the chunks of the file', async () => {
+  const repo = seeded();
+  try {
+    cli(repo, ['write', '--layer', 'semantic', '--title', 'Retry twice',
+      '--body', 'Chỉ thử lại hai lần.', '--source-ref', 'docs/billing.md#L1-L5', '--json']);
+    fs.appendFileSync(path.join(repo.dir, 'docs/billing.md'), '\nthay đổi.\n');
+    git(repo, ['add', 'docs/billing.md']);
+
+    const report = JSON.parse(cli(repo, ['changes', '--json']));
+    const layers = report.covered[0].memories.map((memory) => memory.layer);
+    assert.ok(!layers.includes('artifact'), `artifact chunks crowded out reasoning: ${layers}`);
+    assert.ok(layers.includes('semantic'), 'the decision was not listed');
+  } finally {
+    repo.cleanup();
+  }
+});
+
 test('the working scope sees an untracked file', async () => {
   const repo = seeded();
   try {
