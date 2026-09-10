@@ -682,6 +682,69 @@ export async function runSummarize(
   return { id: written.id, covers: found.memberIds.length };
 }
 
+export interface PruneReport {
+  layer: string;
+  olderThanDays: number;
+  dryRun: boolean;
+  /** What was removed, or what would have been. */
+  candidates: Array<{ id: string; title: string; ageDays: number }>;
+  removed: number;
+}
+
+/**
+ * Forgetting, on purpose and on the narrowest terms that are useful.
+ *
+ * Without this there is no way to forget anything, and the automatic write path
+ * has to stay off: it records an episodic node for every failed command, most of
+ * which are typos, and nothing ever removes them. Decay only lowers their rank --
+ * they keep their postings, so they go on diluting IDF for every real memory
+ * around them.
+ *
+ * Three conditions, all required. Episodic only, because a decision does not
+ * become noise by getting old. Older than the cutoff. And unreferenced, because
+ * a memory something points at is part of somebody's reasoning.
+ */
+export async function runPrune(
+  options: { from?: string; olderThanDays?: number; layer?: string; dryRun?: boolean } = {},
+): Promise<PruneReport> {
+  const olderThanDays = options.olderThanDays ?? 90;
+  const layer = options.layer ?? 'episodic';
+  // Fractions are allowed on purpose: a noisy session from an hour ago is a fair
+  // thing to clear, and a whole-day floor was an arbitrary number rather than a
+  // property. Zero and below are refused, because "older than now" is everything.
+  if (!(olderThanDays > 0)) {
+    throw new Error('--older-than must be greater than 0; "older than now" would match everything.');
+  }
+
+  const storeDir = storeDirOrThrow(options.from);
+  const now = Date.now();
+
+  // Read through a read-only handle, so a preview never takes the write lock.
+  const reader = new MemoryStore(storeDir, { readOnly: true });
+  let candidates: Array<{ id: string; title: string; ageDays: number }>;
+  try {
+    candidates = (await reader.prunable({ layer, olderThanDays })).map((node) => ({
+      id: node.id,
+      title: node.title,
+      ageDays: Math.floor((now - node.createdAt) / (24 * 60 * 60 * 1000)),
+    }));
+  } finally {
+    await reader.close();
+  }
+
+  if (options.dryRun || candidates.length === 0) {
+    return { layer, olderThanDays, dryRun: Boolean(options.dryRun), candidates, removed: 0 };
+  }
+
+  const store = new MemoryStore(storeDir);
+  try {
+    const removed = await store.transact(() => store.deleteNodes(candidates.map((c) => c.id)));
+    return { layer, olderThanDays, dryRun: false, candidates, removed };
+  } finally {
+    await store.close();
+  }
+}
+
 export async function runDoctor(options: { from?: string } = {}): Promise<DoctorReport & { stale: ReturnType<typeof isStale> }> {
   const storeDir = storeDirOrThrow(options.from);
   const store = new MemoryStore(storeDir, { readOnly: true });

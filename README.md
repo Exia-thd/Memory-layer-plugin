@@ -53,6 +53,8 @@ into the session; nothing needs to be configured by hand.
 
 ## Commands
 
+A task-by-task guide is in [docs/usage.md](docs/usage.md).
+
 | Command | Purpose |
 |---|---|
 | `memory init` | Create the store, probe what works, report it |
@@ -71,6 +73,7 @@ into the session; nothing needs to be configured by hand.
 | `memory write` / `memory link` | Record a memory, or relate two |
 | `memory merge` | Fold queued session writes into the store |
 | `memory list` | Registered projects, with index freshness |
+| `memory prune [--older-than N] [--dry-run]` | Forget old, unreferenced episodic memories |
 | `memory doctor` | What is actually working |
 | `memory serve` | MCP server on stdio |
 
@@ -221,6 +224,10 @@ semantic ones do not. Decay demotes; it does not remove.
   directory, where the path ran to 279 characters under pnpm on Windows and the
   download failed as `File doesn't exist` -- which reads as a blocked network and
   was recorded as one. Override with `MEMORY_LAYER_MODEL_CACHE`.
+- **Automatic recording stays off by default.** It records an episodic memory
+  for every failed command, and most failures are typos. `memory prune` exists
+  now, so this is a decision rather than a trap — but turn it on when pruning is
+  a habit, not before.
 - **Summaries are written, never generated.** `memory summarize` stores a
   summary the caller wrote and links it to the group members, so it survives the
   grouping being recomputed. Nothing in a read path calls a model. That is the

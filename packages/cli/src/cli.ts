@@ -29,6 +29,7 @@ const USAGE = `memory - project memory layer
   memory constraints [--limit N]      decisions in force, most important first
   memory changes [--scope S] [--base R]  what memory records about your changed files
   memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
+  memory prune [--older-than 90] [--dry-run]  forget old, unreferenced episodic memories
   memory session start <label> | end [--summary S] | (none)   open, close or show the session
   memory summarize <clusterId> --body S   record a summary for a group of memories
   memory conflicts [--json]           contradictions needing a person
@@ -344,6 +345,29 @@ async function main(argv: string[]): Promise<number> {
           : `merged ${result.merged} entries from ${result.files} session journals`,
       );
       return result.skipped ? 1 : 0;
+    }
+
+    case 'prune': {
+      const report = await api.runPrune({
+        olderThanDays: numberFlag(args, 'older-than'),
+        layer: stringFlag(args, 'layer'),
+        dryRun: Boolean(args.flags['dry-run']),
+      });
+      emit(args, report, () => {
+        if (report.candidates.length === 0) {
+          return `nothing to prune (${report.layer} older than ${report.olderThanDays} days, with no edges)`;
+        }
+        const lines = report.candidates.map(
+          (item) => `  ${item.ageDays}d  ${item.title}`,
+        );
+        lines.push(
+          report.dryRun
+            ? `${report.candidates.length} would be removed; re-run without --dry-run`
+            : `removed ${report.removed}`,
+        );
+        return lines.join('\n');
+      });
+      return 0;
     }
 
     case 'doctor': {

@@ -29,6 +29,9 @@ behind the user's back is exactly the kind of thing a memory layer should not do
 - **NEVER resolve a CONTRADICTS pair on your own.** Surface it; a person decides.
 - **NEVER record a decision without a source_ref.** A memory nobody can trace
   back cannot be checked, and will be believed anyway.
+- **NEVER delete a memory to make a contradiction go away.** `memory prune` only
+  removes old episodic notes nothing points at; a decision you disagree with is
+  superseded, with a link saying so.
 - **NEVER record secrets, credentials, or anything unverified.** A memory layer
   full of guesses is worse than an empty one, because it gets trusted.
 ```

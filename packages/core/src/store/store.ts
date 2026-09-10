@@ -539,6 +539,105 @@ export class MemoryStore {
    * thousands of rows, and a round trip each would make looking at the graph
    * cost more than building it.
    */
+  /**
+   * Removes nodes and everything the index knows about them.
+   *
+   * Four things, not one. Deleting the row and stopping would leave the node in
+   * every posting list that mentions it, in Bm25Doc, and in the global counts --
+   * a keyword index that answers with ids that no longer resolve, and averages
+   * computed over documents that are gone. None of that raises an error; it just
+   * makes search quietly wrong, which is the failure this project keeps finding.
+   *
+   * Only nodes with no relationships are accepted. That is a real restriction and
+   * a deliberate one: a memory that something points at is part of somebody's
+   * reasoning, and deleting it silently breaks that chain.
+   */
+  async deleteNodes(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+
+    let removed = 0;
+    for (const id of ids) {
+      const rows = await this.run(
+        `MATCH (m:Memory) WHERE m.id = $id
+         RETURN m.title AS title, m.body AS body`,
+        { id },
+      );
+      const node = rows[0] as { title?: string; body?: string } | undefined;
+      if (!node) continue;
+
+      const connected = await this.run(
+        'MATCH (m:Memory)-[]-() WHERE m.id = $id RETURN m.id AS id LIMIT 1',
+        { id },
+      );
+      if (connected.length > 0) {
+        throw new Error(
+          `Refusing to delete ${id}: it has edges, so something points at it. ` +
+            'Unlink it first if that is really what you want.',
+        );
+      }
+
+      // The terms to touch come from the node's own text, so this costs one read
+      // per term the node used rather than a scan of every term in the store.
+      const terms = [...new Set(tokenize(`${node.title ?? ''}\n${node.body ?? ''}`))];
+      for (let offset = 0; offset < terms.length; offset += 256) {
+        const batch = terms.slice(offset, offset + 256);
+        const found = await this.run(
+          'MATCH (t:Bm25Term) WHERE list_contains($terms, t.term) RETURN t.term AS term, t.postings AS postings',
+          { terms: batch },
+        );
+        for (const row of found) {
+          const postings = decodePostings((row.postings as string) ?? '');
+          if (!postings.delete(id)) continue;
+          if (postings.size === 0) {
+            await this.run('MATCH (t:Bm25Term) WHERE t.term = $term DELETE t', { term: row.term });
+          } else {
+            await this.run(
+              'MATCH (t:Bm25Term) WHERE t.term = $term SET t.postings = $postings, t.df = $df',
+              { term: row.term, postings: encodePostings(postings), df: postings.size },
+            );
+          }
+        }
+      }
+
+      const doc = await this.run(
+        'MATCH (d:Bm25Doc) WHERE d.node_id = $id RETURN d.length AS length',
+        { id },
+      );
+      const length = Number((doc[0] as { length?: number } | undefined)?.length ?? 0);
+      if (doc.length > 0) {
+        await this.run('MATCH (d:Bm25Doc) WHERE d.node_id = $id DELETE d', { id });
+        await this.run(
+          `MATCH (s:Bm25Stat) WHERE s.id = 'global'
+           SET s.doc_count = s.doc_count - 1, s.total_length = s.total_length - $length`,
+          { length },
+        );
+      }
+
+      await this.run('MATCH (m:Memory) WHERE m.id = $id DELETE m', { id });
+      removed += 1;
+    }
+    return removed;
+  }
+
+  /**
+   * Nodes old enough, unreferenced, and of a layer that is safe to forget.
+   *
+   * Episodic only by default. A decision is not noise however old it gets, and
+   * an artifact chunk belongs to a file that ingest will re-derive anyway.
+   */
+  async prunable(options: { layer?: string; olderThanDays: number }): Promise<MemoryNode[]> {
+    const cutoff = Date.now() - options.olderThanDays * 24 * 60 * 60 * 1000;
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.layer = $layer AND m.created_at < $cutoff
+         AND NOT EXISTS { MATCH (m)-[]-() }
+       RETURN ${NODE_COLUMNS}
+       ORDER BY m.created_at`,
+      { layer: options.layer ?? 'episodic', cutoff },
+    );
+    return rows.map(rowToNode);
+  }
+
   async symbolMap(prefix?: string): Promise<Array<SymbolRow & { memories: Array<{ id: string; title: string; layer: string }> }>> {
     const rows = await this.run(
       `MATCH (s:Symbol)
