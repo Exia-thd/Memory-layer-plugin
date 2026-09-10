@@ -140,6 +140,15 @@ memory ui --out graph.html    # somewhere you can mail it
 Three tabs: a 3D graph of files, declarations and the memory about them; the
 store as a filterable table; and the `doctor` report.
 
+Clicking any node in the graph opens what it is about — a declaration answers
+with the memory recorded against it, a file with everything its declarations
+carry plus anything recorded straight against the path. A click that finds
+nothing says so rather than doing nothing.
+
+Light by default. The toggle in the header switches to dark and remembers the
+choice; it does not follow the operating system, because that would hand a dark
+page to somebody who wanted a white one.
+
 **It is read-only, and a snapshot.** Every write in this system is a short-lived
 process, which is what lets several sessions run at once without fighting over
 the store — a page holding a write connection would break exactly that. Where an
