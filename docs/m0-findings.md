@@ -5,6 +5,8 @@ this repository was built in. Every number below came from running the code, not
 from a datasheet. Where a question could not be answered here, that is stated
 rather than estimated.
 
+> Tiếng Việt: [m0-findings_vn.md](m0-findings_vn.md)
+
 ---
 
 ## 1. Storage backend: what LadybugDB actually provides

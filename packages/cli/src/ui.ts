@@ -20,11 +20,32 @@ const MAX_GRAPH_NODES = 1500;
 export async function runUi(
   options: { from?: string; out?: string; prefix?: string } = {},
 ): Promise<{ file: string; nodes: number; truncated: boolean }> {
-  const project = resolveProject(options.from);
   const storeDir = storeDirOrThrow(options.from);
   const store = new MemoryStore(storeDir, { readOnly: true });
-
   try {
+    return await buildUi(store, storeDir, options);
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * The same work, on a handle somebody else owns.
+ *
+ * A LadybugDB path can be opened once per process, and closing it does not
+ * release the file immediately on Windows -- so `init`, which holds the store
+ * open to scan, cannot hand off to a function that opens its own. It failed
+ * intermittently rather than always, which is worse: the page was there or not
+ * depending on timing.
+ */
+export async function buildUi(
+  store: MemoryStore,
+  storeDir: string,
+  options: { from?: string; out?: string; prefix?: string } = {},
+): Promise<{ file: string; nodes: number; truncated: boolean }> {
+  const project = resolveProject(options.from);
+
+  {
     const provider = await embedder(store.dimensions);
 
     // One at a time, not Promise.all.
@@ -105,8 +126,6 @@ export async function runUi(
     fs.writeFileSync(file, renderUi(payload), 'utf8');
 
     return { file, nodes: graph.nodes.length, truncated };
-  } finally {
-    await store.close();
   }
 }
 

@@ -1,3 +1,5 @@
+import nodeFs from 'node:fs';
+import nodePath from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
@@ -62,6 +64,30 @@ export function changedFiles(root: string, scope: 'staged' | 'working' | 'compar
 
 function unique(items: string[]): string[] {
   return [...new Set(items)].sort();
+}
+
+/**
+ * Where a project keeps the things worth remembering.
+ *
+ * Installing into a codebase that already exists is the case this layer is for,
+ * and asking somebody to guess which paths to feed it is asking them to do the
+ * work twice. These are the conventional homes for documentation, decisions and
+ * source; whatever exists gets scanned, and `init` reports what it found so the
+ * guess is visible rather than silent.
+ *
+ * Deliberately no bare '.': scanning a whole repository picks up vendored code,
+ * build output and anything else the ignore rules did not anticipate, and the
+ * first thing a new user would see is a store full of noise.
+ */
+const SCAN_CANDIDATES = [
+  'docs', 'doc', 'documentation', 'adr', 'adrs', 'rfc', 'rfcs',
+  'src', 'lib', 'app', 'packages', 'internal', 'pkg', 'cmd',
+  'README.md', 'README.rst', 'ARCHITECTURE.md', 'CONTRIBUTING.md',
+  'CHANGELOG.md', 'DECISIONS.md',
+];
+
+export function scanTargets(root: string): string[] {
+  return SCAN_CANDIDATES.filter((candidate) => nodeFs.existsSync(nodePath.join(root, candidate)));
 }
 
 /** Resolves the project from a directory, refusing to guess when it is not a repo. */

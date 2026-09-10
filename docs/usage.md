@@ -4,7 +4,58 @@ Code says what runs. It does not say why. A function that retries twice is
 readable; that a third retry existed and was removed because the payment gateway
 counted it as a fresh authorisation is not in the code, and never will be.
 
+> Tiếng Việt: [usage_vn.md](usage_vn.md)
+
 That is what this stores, and everything below follows from it.
+
+---
+
+## The whole flow, once
+
+```
+install the plugin
+        │
+        ▼
+memory init ──────────────────────────────────────────┐
+        │  creates .memory/                          │
+        │  probes what this platform can do          │  one command
+        │  scans docs/ src/ README.md …              │
+        │  builds the code graph (files → symbols)   │
+        │  writes .memory/ui.html                    │
+        ▼                                             ┘
+open .memory/ui.html          ← the graph, the store, the health report
+        │
+        ▼
+work ── the plugin reads on its own:
+        │   session start      → constraints and unresolved conflicts
+        │   before Read/Grep   → what memory knows about that file
+        │   before git commit  → what the staged diff touches
+        ▼
+memory write ────────────── a decision, by hand, with the reason
+        │
+        ▼
+memory ingest docs src ──── after files change (put it in post-commit)
+        │  replaces what those files produced before
+        │  rewrites ui.html
+        ▼
+memory prune ────────────── occasionally: old episodic notes nothing points at
+```
+
+Two things are automatic and two are not, and the split is deliberate.
+
+**Reading is automatic.** Hooks load context at session start, before a file is
+read, and before a commit. Nothing to remember.
+
+**Indexing is derived data**, so letting it run itself is safe — the files are
+the truth, re-indexing is idempotent, and the only failure is falling behind.
+Put `memory ingest` in `post-commit`.
+
+**Writing a decision is a judgement**, so it stays in your hands. The reason a
+choice was made over the alternative is the part no machine can infer, and it is
+the only part worth storing.
+
+**Forgetting is a judgement too.** `memory prune` removes only old episodic notes
+that nothing points at, and it will not touch a decision however old it gets.
 
 ---
 
@@ -14,7 +65,7 @@ That is what this stores, and everything below follows from it.
 memory init
 ```
 
-Creates the store in `.memory-layer/`, probes what this platform can actually do,
+Creates the store in `.memory/`, probes what this platform can actually do,
 and prints the result. Read that output — it is the only place that tells you
 whether semantic search is real or a fallback:
 
@@ -132,10 +183,25 @@ One HTML file with everything baked in. No server, no build step — open it fro
 the filesystem.
 
 ```bash
-memory ui                     # writes .memory-layer/ui.html
+memory ui                     # writes .memory/ui.html
 memory ui src/store           # narrowed to a path
 memory ui --out graph.html    # somewhere you can mail it
 ```
+
+**When it appears:** `memory init` writes it, and every `ingest` or `prune` that
+changed something rewrites it. You rarely run `memory ui` by hand — it is there
+for a narrowed view, or a copy to send somebody.
+
+**Does reloading update it? No, and it cannot.** The data is baked into the file.
+A browser refuses `fetch` over `file://`, so a page opened from disk cannot read
+a data file beside it; inlining is the only way a page works with no server, and
+that makes it a snapshot. Refreshing the browser shows the same snapshot — what
+refreshes it is the next `ingest`. The header carries the time it was built, so
+you can see how old what you are looking at is.
+
+`--no-ui` skips the rewrite on a command that does not want the cost, about
+600 ms on a store of 638 nodes.
+
 
 Three tabs: a 3D graph of files, declarations and the memory about them; the
 store as a filterable table; and the `doctor` report.

@@ -40,7 +40,7 @@ test('R3-b: with a working parser, long code is cut on declaration boundaries', 
 test('R3-a: a parser that cannot be built is reported, not absorbed', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     // The capability probe is the thing under test, so the toolchain is switched
     // off at the same seam an actual breakage would appear at.
@@ -65,7 +65,7 @@ test('R3-a: a parser that cannot be built is reported, not absorbed', () => {
 test('R3-a2: init records the capability so it can be read back', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const meta = JSON.parse(fs.readFileSync(path.join(repo.dir, '.memory', 'meta.json'), 'utf8'));
     assert.ok(meta.capabilities.astChunking, 'astChunking is absent from the recorded capabilities');
     assert.equal(meta.capabilities.astChunking.status, 'available');
@@ -94,7 +94,7 @@ test('R3-c2: an unparseable file is still ingested and searchable', () => {
     'src/broken.ts': `function alpha( {{{ ]]] unclosed\n${'  // sentinelword garbage\n'.repeat(80)}`,
   });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'src']);
     const { results } = JSON.parse(cli(repo, ['search', 'sentinelword', '--json']));
     assert.ok(results.length > 0, 'a file the parser rejected was dropped instead of chunked');

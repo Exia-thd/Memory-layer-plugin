@@ -3,6 +3,8 @@
 Paste this into the project's `CLAUDE.md` to put memory in front of the agent on
 every session, not only when it remembers a tool exists.
 
+> Tiếng Việt: [agent-guidance_vn.md](agent-guidance_vn.md)
+
 The plugin does not write this file for you. Editing a project's `CLAUDE.md`
 behind the user's back is exactly the kind of thing a memory layer should not do.
 

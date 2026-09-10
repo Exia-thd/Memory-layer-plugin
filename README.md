@@ -4,9 +4,12 @@ Project memory for Claude: it records **why** — decisions, the incidents that
 prompted them, constraints, and the relationships between them — and retrieves
 them when an agent needs the reasoning behind unfamiliar code.
 
-It does not build a code graph. Call graphs and impact analysis answer *what
-calls what*; this answers *why it is like that*. Different question, different
-lifecycle, separate store.
+> Tiếng Việt: [README_vn.md](README_vn.md)
+
+It records what each file declares, so a question about a symbol has something
+to anchor on — but deliberately no call graph and no imports. *What calls what*
+is a different question with a different lifecycle; this one answers *why it is
+like that*.
 
 ---
 
@@ -41,13 +44,22 @@ Requires Node 20.11+ and a git repository.
 pnpm install
 pnpm build
 
-node packages/cli/dist/cli.js init
-node packages/cli/dist/cli.js ingest docs
+node packages/cli/dist/cli.js init      # store, scan, code graph, viewer
 node packages/cli/dist/cli.js search "why do we retry declined cards"
 ```
 
+`init` is the whole setup: it scans the conventional places a project keeps
+documentation and source, builds the code graph, and writes
+`.memory/ui.html` — open that in a browser to see what it found.
+
+Installing into a codebase that already exists is the case this is for, so
+nothing about it assumes an empty repository.
+
 As a Claude plugin, `.mcp.json` registers the MCP server and `hooks/` wires it
 into the session; nothing needs to be configured by hand.
+
+A task-by-task guide, including what to automate and what not to, is in
+[docs/usage.md](docs/usage.md).
 
 ---
 
@@ -57,8 +69,8 @@ A task-by-task guide is in [docs/usage.md](docs/usage.md).
 
 | Command | Purpose |
 |---|---|
-| `memory init` | Create the store, probe what works, report it |
-| `memory ingest <paths>` | Load files into the one store — no import step |
+| `memory init [paths...]` | Create the store, scan the project, build the code graph and the viewer |
+| `memory ingest <paths>` | Load files — replaces what they produced before, refreshes the viewer |
 | `memory search <query>` | Three-branch retrieval with a fusion report |
 | `memory why <file\|symbol> [--anchor-only]` | Decisions and constraints touching it — a bare symbol anchors on the declaration. `--anchor-only` skips the embedding model, which costs ~2.5 s |
 | `memory changes [--scope S]` | What memory records about the files you are about to commit |
@@ -161,7 +173,7 @@ So:
 The AST chunker was the thing everyone was sure was always there.
 
 ```bash
-node --test tests/*.test.js     # 34 tests
+node --test --test-concurrency=1 tests/*.test.js   # 119 tests
 node packages/cli/dist/cli.js doctor
 ```
 
@@ -277,7 +289,9 @@ semantic ones do not. Decay demotes; it does not remove.
 |---|---|
 | `MEMORY_LAYER_EMBEDDINGS` | `auto` (default), `local` (require the real model), `hash` (offline fallback) |
 | `MEMORY_LAYER_DIMS` | Vector width at `init`. Fixed thereafter. |
-| `MEMORY_LAYER_HOME` | Registry and log location (default `~/.memory`) |
+| `MEMORY_LAYER_HOME` | Registry, logs and model cache (default `~/.memory`) |
+| `MEMORY_LAYER_MODEL_CACHE` | Model weights, if they need to live elsewhere |
+| `MEMORY_LAYER_OUTPUT_BUDGET` | Byte cap on MCP tool output (default 24000) |
 | `MEMORY_LAYER_AUTO_RECORD` | `1` to let hooks record failed commands |
 | `MEMORY_LAYER_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
 

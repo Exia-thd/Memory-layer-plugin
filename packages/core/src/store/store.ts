@@ -552,6 +552,54 @@ export class MemoryStore {
    * a deliberate one: a memory that something points at is part of somebody's
    * reasoning, and deleting it silently breaks that chain.
    */
+  /**
+   * Ingest-derived nodes for a file that this pass did not produce.
+   *
+   * Chunk ids are derived from content, so editing a file yields new ids and
+   * leaves the previous versions behind. Nothing removed them, so one file
+   * edited three times became three nodes -- all still indexed, all competing
+   * for the same query. Only the artifact layer is considered: everything else
+   * was written by a person and is not ingest's to reclaim.
+   */
+  async staleArtifacts(filePath: string, keep: string[]): Promise<MemoryNode[]> {
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.layer = 'artifact' AND m.file_path = $filePath
+         AND NOT list_contains($keep, m.id)
+         AND m.superseded_at = 0
+       RETURN ${NODE_COLUMNS}`,
+      { filePath, keep },
+    );
+    return rows.map(rowToNode);
+  }
+
+  /**
+   * Marks a node superseded rather than removing it.
+   *
+   * For a node something points at, deletion would break the chain: a decision
+   * whose DERIVED_FROM leads nowhere is worse than a stale chunk. Superseded
+   * nodes drop out of retrieval but the edge still resolves.
+   */
+  async supersede(ids: string[], at = Date.now()): Promise<number> {
+    let marked = 0;
+    for (const id of ids) {
+      await this.run(
+        'MATCH (m:Memory) WHERE m.id = $id AND m.superseded_at = 0 SET m.superseded_at = $at',
+        { id, at },
+      );
+      marked += 1;
+    }
+    return marked;
+  }
+
+  async hasEdges(id: string): Promise<boolean> {
+    const rows = await this.run(
+      'MATCH (m:Memory)-[]-() WHERE m.id = $id RETURN m.id AS id LIMIT 1',
+      { id },
+    );
+    return rows.length > 0;
+  }
+
   async deleteNodes(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 

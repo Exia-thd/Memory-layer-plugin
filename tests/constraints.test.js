@@ -22,7 +22,7 @@ retries tripped the processor fraud heuristic and flagged the merchant account.
 test('C1: what is ingested is searchable, with no step in between', async () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     // No import, no migrate, no rebuild: straight from ingest to search.
@@ -72,7 +72,7 @@ test('C3: a broken store exits non-zero and says why', () => {
     assert.notEqual(result.status, 0, 'a missing store exited zero');
     assert.match(result.stderr, /memory init/);
 
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     fs.writeFileSync(path.join(repo.dir, '.memory', 'meta.json'), '{ this is not json');
     const corrupted = cliRaw(repo, ['doctor']);
     assert.notEqual(corrupted.status, 0, 'a corrupt store exited zero');
@@ -85,7 +85,7 @@ test('C3: a broken store exits non-zero and says why', () => {
 test('C4: a branch that contributes nothing is named in the result', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const healthy = JSON.parse(cli(repo, ['search', 'declined card retry', '--json']));
@@ -105,7 +105,7 @@ test('C4: a branch that contributes nothing is named in the result', () => {
 test('C5: queries are matched by term, not as one substring', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     // These words never appear in this order or adjacency in the document. A
@@ -123,7 +123,7 @@ test('C5: queries are matched by term, not as one substring', () => {
 test('C6: depth actually changes the traversal', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     const error = write(repo, 'episodic', 'Merchant account flagged', 'Three retries tripped the fraud heuristic.', 'session:1');
     const decision = write(repo, 'semantic', 'Cap retries at two', 'Chosen over backoff because attempts are counted, not elapsed time.', 'docs/billing.md#L3-L8');
@@ -145,7 +145,7 @@ test('C6: depth actually changes the traversal', () => {
 test('C6b: traversal is bidirectional, so an error reaches the decision that fixed it', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const error = write(repo, 'episodic', 'Merchant account flagged', 'Three retries tripped the fraud heuristic.', 'session:1');
     const decision = write(repo, 'semantic', 'Cap retries at two', 'Chosen over backoff.', 'docs/billing.md#L3-L8');
 
@@ -164,7 +164,7 @@ test('C6b: traversal is bidirectional, so an error reaches the decision that fix
 test('C7: everything writable is readable back through a path that is exercised', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     const a = write(repo, 'semantic', 'Cap retries at two', 'Chosen over exponential backoff.', 'docs/billing.md#L3-L8');
     const b = write(repo, 'episodic', 'Merchant account flagged', 'Three retries tripped the heuristic.', 'session:1');
@@ -248,7 +248,7 @@ test('C9: the README does not claim GraphRAG without cluster summarisation', () 
 test('C10: a reader never serves a snapshot from before the last write', () => {
   const repo = makeRepo({ 'docs/billing.md': DOC });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     write(repo, 'semantic', 'First decision', 'Recorded before the reader opened.', 'docs/a.md#L1-L2');
 
     const before = JSON.parse(cli(repo, ['search', 'decision recorded', '--json']));

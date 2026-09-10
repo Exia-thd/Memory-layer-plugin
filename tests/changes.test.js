@@ -31,7 +31,7 @@ function seeded() {
     'src/charge.js': 'export function charge(invoice) {\n  return psp.capture(invoice.amount);\n}\n',
     'src/unrelated.js': 'export const noop = () => {};\n',
   });
-  cli(repo, ['init']);
+  cli(repo, ['init', '--no-scan']);
   cli(repo, ['ingest', 'docs/billing.md']);
   return repo;
 }
@@ -76,7 +76,7 @@ test('a flood of chunks is capped, and the cut is stated', async () => {
   const many = Array.from({ length: 40 }, (_, i) => `## Mục ${i}\n\n${filler} ${i}.\n`).join('\n');
   const repo = makeRepo({ 'docs/long.md': `# Dài\n\n${many}` });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs/long.md']);
     fs.appendFileSync(path.join(repo.dir, 'docs/long.md'), '\nthêm.\n');
     git(repo, ['add', 'docs/long.md']);

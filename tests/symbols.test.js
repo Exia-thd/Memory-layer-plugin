@@ -54,7 +54,7 @@ test('a file the grammar cannot read declares nothing rather than throwing', asy
 test('ingest records symbols and why anchors on a bare name', async () => {
   const repo = makeRepo({ 'src/charge.js': SOURCE });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const report = JSON.parse(cli(repo, ['ingest', 'src/charge.js', '--json']));
     assert.ok(report.symbols > 0, `no symbols recorded: ${JSON.stringify(report)}`);
 
@@ -72,7 +72,7 @@ test('ingest records symbols and why anchors on a bare name', async () => {
 test('a name nothing declares still reports the anchor branch as empty', async () => {
   const repo = makeRepo({ 'src/charge.js': SOURCE });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'src/charge.js']);
 
     const why = JSON.parse(cli(repo, ['why', 'noSuchSymbol', '--json']));
@@ -87,7 +87,7 @@ test('a name nothing declares still reports the anchor branch as empty', async (
 test('re-ingesting the same file does not duplicate symbols', async () => {
   const repo = makeRepo({ 'src/charge.js': SOURCE });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const first = JSON.parse(cli(repo, ['ingest', 'src/charge.js', '--json']));
     const second = JSON.parse(cli(repo, ['ingest', 'src/charge.js', '--force', '--json']));
     assert.equal(second.symbols, first.symbols, 'a forced re-ingest changed the symbol count');

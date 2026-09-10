@@ -30,7 +30,7 @@ function seeded() {
     'src/charge.js': 'export function chargeInvoice(invoice) {\n  return psp.capture(invoice.amount);\n}\n',
     'docs/adr.md': '# Thanh toan\n\n## Retry\n\nQuyet dinh: thu lai hai lan.\n',
   });
-  cli(repo, ['init']);
+  cli(repo, ['init', '--no-scan']);
   cli(repo, ['ingest', 'src', 'docs']);
   return repo;
 }

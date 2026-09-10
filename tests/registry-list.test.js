@@ -47,7 +47,7 @@ test('R6-a: listing many projects keeps a small cost per project', () => {
   const repo = makeRepo({ 'a.md': '# a\n' });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'many-'));
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     const entries = Array.from({ length: 50 }, (_, i) => fakeProject(root, `project-${i}`));
     const registry = path.join(repo.home, 'registry.json');
@@ -98,7 +98,7 @@ test('R6-b: one broken project does not take the listing down with it', () => {
   const repo = makeRepo({ 'a.md': '# a\n' });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'many-'));
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     const good = fakeProject(root, 'good');
     const moved = fakeProject(root, 'moved');
@@ -138,7 +138,7 @@ test('R6-c: a project whose HEAD moved is reported stale', () => {
   const repo = makeRepo({ 'a.md': '# a\n' });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'many-'));
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const project = fakeProject(root, 'drifting');
     fs.writeFileSync(path.join(repo.home, 'registry.json'), JSON.stringify([project]));
 

@@ -4,7 +4,9 @@ import {
   type Layer, type EdgeType,
 } from '@memory-layer/core';
 import * as api from './api.js';
-import { resolveProject, storeDirOrThrow } from './project.js';
+import nodeFs from 'node:fs';
+import nodePath from 'node:path';
+import { resolveProject, storeDirOrThrow, scanTargets } from './project.js';
 // Imported where it is used, not at the top.
 //
 // `mcp.js` drags in the MCP SDK, which cost 290ms on every command that is not
@@ -19,8 +21,8 @@ import { resolveProject, storeDirOrThrow } from './project.js';
 
 const USAGE = `memory - project memory layer
 
-  memory init [--dims N]              create the store here and report what works
-  memory ingest <paths...> [--layer L] [--force] [--no-embed]
+  memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
+  memory ingest <paths...> [--layer L] [--force] [--no-embed] [--no-ui]
   memory embed [--force]              embed nodes missing a current vector
   memory search <query> [--limit N] [--layer L] [--json]
   memory why <file|symbol> [--json]   decisions and constraints touching it
@@ -73,6 +75,41 @@ function parseArgs(argv: string[]): Args {
   return { positional, flags };
 }
 
+/**
+ * Writes the viewer, so it is there and current without anybody remembering it.
+ *
+ * The page carries its data inline because a browser refuses `fetch` over
+ * `file://`. That makes a stale page the normal state rather than an accident,
+ * and the only fix is to rewrite it whenever the store changed -- which is why
+ * this runs after ingest rather than waiting to be asked.
+ *
+ * `--no-ui` skips it for a command that does not want the cost.
+ */
+async function refreshUi(): Promise<string | null> {
+  let storeDir: string;
+  try {
+    storeDir = storeDirOrThrow();
+  } catch {
+    return null;
+  }
+
+  const page = nodePath.join(storeDir, 'ui.html');
+
+  try {
+    const { runUi } = await import('./ui.js');
+    const built = await runUi({ out: page });
+    return built.file;
+  } catch (err) {
+    // A viewer that failed to rebuild must not fail the command that triggered
+    // it -- but it must not pretend to have rebuilt either, or the page quietly
+    // goes on showing last week.
+    process.stderr.write(
+      `warning: could not refresh ${page}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return null;
+  }
+}
+
 function stringFlag(args: Args, name: string): string | undefined {
   const value = args.flags[name];
   return typeof value === 'string' ? value : undefined;
@@ -118,11 +155,41 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'init': {
-      const { storeDir, report } = await api.init({ dimensions: stringFlag(args, 'dims') });
+      const targets = args.flags['no-scan']
+        ? []
+        : args.positional.length > 0
+          ? args.positional
+          : scanTargets(resolveProject().root);
+
+      // Said before it runs: a guess about which paths matter should be visible.
+      if (targets.length > 0) process.stdout.write(`scanning ${targets.join(', ')}\n`);
+
+      const { storeDir, report, scanned, page } = await api.init({
+        dimensions: stringFlag(args, 'dims'),
+        scan: targets,
+        embed: !args.flags['no-embed'],
+        ui: !args.flags['no-ui'],
+      });
       process.stdout.write(`store created at ${storeDir}\n\n${formatReport(report)}\n`);
       if (report.failed) {
         process.stderr.write('\ninit finished with failing checks; fix them before relying on search.\n');
         return 1;
+      }
+
+      // Installing into a codebase that already exists is what this is for, so
+      // init finishes the job: scan, build the code graph, write the viewer.
+      // Anything else leaves a new user with an empty store and a second command
+      // to discover.
+      if (scanned) {
+        process.stdout.write(
+          `
+${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.files} files\n`,
+        );
+        if (page) process.stdout.write(`open ${page}\n`);
+      } else if (targets.length === 0 && !args.flags['no-scan']) {
+        process.stdout.write(
+          '\nNothing conventional to scan here. Point it somewhere: memory ingest <paths>\n',
+        );
       }
       return 0;
     }
@@ -141,6 +208,11 @@ async function main(argv: string[]): Promise<number> {
           ? `\nredacted: ${report.redactions.map((r) => `${r.rule} x${r.count}`).join(', ')}`
           : ''),
       );
+      if (report.created + report.refreshed + report.removed > 0 && !args.flags['no-ui']) {
+        const page = await refreshUi();
+        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}
+`);
+      }
       return 0;
     }
 
@@ -368,6 +440,11 @@ async function main(argv: string[]): Promise<number> {
         );
         return lines.join('\n');
       });
+      if (report.removed > 0 && !args.flags['no-ui']) {
+        const page = await refreshUi();
+        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}
+`);
+      }
       return 0;
     }
 

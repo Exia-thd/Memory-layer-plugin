@@ -18,7 +18,7 @@ import { makeRepo, cli } from './helpers.js';
 test('a memory written during a session records that it occurred in it', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n\nGhi chú.\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const opened = JSON.parse(cli(repo, ['session', 'start', 'sửa retry', '--json']));
     assert.ok(opened.id, 'no session node was created');
 
@@ -43,7 +43,7 @@ test('a memory written during a session records that it occurred in it', async (
 test('the session node does not occur in itself', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const opened = JSON.parse(cli(repo, ['session', 'start', 'x', '--json']));
     const graph = JSON.parse(cli(repo, ['graph', opened.id, '--json']));
     assert.ok(
@@ -58,7 +58,7 @@ test('the session node does not occur in itself', async () => {
 test('closing a session stops the linking', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['session', 'start', 'x']);
     const closed = JSON.parse(cli(repo, ['session', 'end', '--json']));
     assert.ok(closed.closed, 'nothing was closed');

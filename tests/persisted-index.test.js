@@ -44,7 +44,7 @@ async function openStore(repo, options = {}) {
 test('R4-a: a fresh process searches without rebuilding an index', async () => {
   const repo = makeRepo(CORPUS);
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     // A new process, exactly as the CLI runs. If the persisted index were missing
@@ -70,7 +70,7 @@ test('R4-a: a fresh process searches without rebuilding an index', async () => {
 test('R4-b: persisted and in-memory ranking agree', async () => {
   const repo = makeRepo(CORPUS);
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const store = await openStore(repo, { readOnly: true });
@@ -113,7 +113,7 @@ test('R4-b: persisted and in-memory ranking agree', async () => {
 test('R4-c: a write is reflected in the persisted index, not served stale', async () => {
   const repo = makeRepo(CORPUS);
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const store = await openStore(repo, { readOnly: true });
@@ -137,7 +137,7 @@ test('R4-c: a write is reflected in the persisted index, not served stale', asyn
 test('R4-c2: index and nodes commit together or not at all', async () => {
   const repo = makeRepo(CORPUS);
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const store = await openStore(repo);
 
     await assert.rejects(
@@ -200,7 +200,7 @@ test('R4-e: postings survive a round trip, including awkward ids', () => {
 test('R4-f: search returns the same top results through the whole pipeline', async () => {
   const repo = makeRepo(CORPUS);
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const store = await openStore(repo, { readOnly: true });

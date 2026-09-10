@@ -37,7 +37,7 @@ function grouped(repo) {
 test('a cluster carries no summary until one is written', async () => {
   const repo = makeRepo({ 'docs/billing.md': '# Billing\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     grouped(repo);
     const before = JSON.parse(cli(repo, ['clusters', '--json']));
     assert.ok(before.length > 0, 'no clusters were found');
@@ -53,7 +53,7 @@ test('a cluster carries no summary until one is written', async () => {
 test('a written summary is found again through its members', async () => {
   const repo = makeRepo({ 'docs/billing.md': '# Billing\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     grouped(repo);
     const clusterId = JSON.parse(cli(repo, ['clusters', '--json']))[0].id;
 
@@ -78,7 +78,7 @@ test('a written summary is found again through its members', async () => {
 test('a note derived from one memory is not mistaken for a summary', async () => {
   const repo = makeRepo({ 'docs/billing.md': '# Billing\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const ids = grouped(repo);
 
     const note = JSON.parse(cli(repo, [
@@ -100,7 +100,7 @@ test('a note derived from one memory is not mistaken for a summary', async () =>
 test('an empty summary is refused', async () => {
   const repo = makeRepo({ 'docs/billing.md': '# Billing\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     grouped(repo);
     const clusterId = JSON.parse(cli(repo, ['clusters', '--json']))[0].id;
 

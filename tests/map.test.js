@@ -23,7 +23,7 @@ const SOURCE = [
 
 function seeded() {
   const repo = makeRepo({ 'src/charge.js': SOURCE, 'docs/note.md': '# Note\n\nGhi chú.\n' });
-  cli(repo, ['init']);
+  cli(repo, ['init', '--no-scan']);
   cli(repo, ['ingest', 'src', 'docs']);
   return repo;
 }
@@ -73,7 +73,7 @@ test('the mermaid output is a diagram, and survives awkward labels', async () =>
     'docs/note.md': '# A "quoted" [heading] (with) {braces}\n\nGhi chú.\n',
   });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'src', 'docs']);
 
     const diagram = cli(repo, ['map', '--format', 'mermaid']);
@@ -98,7 +98,7 @@ test('the mermaid output is a diagram, and survives awkward labels', async () =>
 test('an empty store says so rather than printing an empty diagram', async () => {
   const repo = makeRepo({ 'docs/note.md': '# Note\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
 
     const tree = cli(repo, ['map']);
     assert.match(tree, /No declarations recorded/);

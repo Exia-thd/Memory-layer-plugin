@@ -26,6 +26,10 @@ export interface IngestReport {
   embedded: number;
   /** Declarations named while chunking, and tied to the memory about them. */
   symbols: number;
+  /** Previous versions of a re-ingested file, dropped because nothing referenced them. */
+  removed: number;
+  /** Previous versions kept but retired, because an edge still points at them. */
+  superseded: number;
   redactions: { rule: string; count: number }[];
 }
 
@@ -54,7 +58,8 @@ export async function ingest(
   options: IngestOptions = {},
 ): Promise<IngestReport> {
   const report: IngestReport = {
-    files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, symbols: 0, redactions: [],
+    files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, symbols: 0,
+    removed: 0, superseded: 0, redactions: [],
   };
   const redactionTotals = new Map<string, number>();
   const meta = store.getMeta();
@@ -184,13 +189,32 @@ export async function ingest(
           embedded += 1;
         }
       }
-      return { created, refreshed, embedded, symbols };
+      // Everything this file used to produce and no longer does.
+      //
+      // Chunk ids come from content, so an edited file yields new ids and the
+      // previous versions stay behind: one file edited three times became three
+      // nodes, all indexed, all answering the same query. Removed if nothing
+      // points at them, superseded if something does -- a decision whose
+      // DERIVED_FROM leads nowhere is worse than a stale chunk.
+      const stale = await store.staleArtifacts(relative, prepared.map((item) => item.node.id));
+      const removable: string[] = [];
+      const keepable: string[] = [];
+      for (const node of stale) {
+        if (await store.hasEdges(node.id)) keepable.push(node.id);
+        else removable.push(node.id);
+      }
+      const removed = await store.deleteNodes(removable);
+      const superseded = await store.supersede(keepable);
+
+      return { created, refreshed, embedded, symbols, removed, superseded };
     }, { fileHashes: fileHash, tokenizerVersion: TOKENIZER_VERSION });
 
     report.created += counts.created;
     report.refreshed += counts.refreshed;
     report.embedded += counts.embedded;
     report.symbols += counts.symbols;
+    report.removed += counts.removed;
+    report.superseded += counts.superseded;
     fileHashes[relative] = hash;
   }
 

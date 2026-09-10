@@ -39,7 +39,14 @@ export interface InitOptions {
   seed?: string[];
 }
 
-export async function init(options: InitOptions = {}): Promise<{ storeDir: string; report: DoctorReport }> {
+export async function init(
+  options: InitOptions & { scan?: string[]; embed?: boolean; ui?: boolean } = {},
+): Promise<{
+  storeDir: string;
+  report: DoctorReport;
+  scanned: IngestReport | null;
+  page: string | null;
+}> {
   const project = resolveProject(options.from);
   const dir = storeDirFor(project.root);
   const dimensions = parseDimensions(options.dimensions ?? process.env.MEMORY_LAYER_DIMS);
@@ -78,9 +85,38 @@ export async function init(options: InitOptions = {}): Promise<{ storeDir: strin
     indexedAt: new Date().toISOString(),
   });
 
+  // Scanning happens on this handle, not a fresh one.
+  //
+  // A LadybugDB path can be opened for writing once per process, so an init that
+  // closed and then called runIngest would take the lock against itself -- which
+  // is exactly what the first attempt did. Passing the open store through is the
+  // only way to do both in one command.
+  let scanned: IngestReport | null = null;
+  if (options.scan && options.scan.length > 0) {
+    scanned = await ingest(store, options.scan, {
+      layer: 'artifact',
+      force: false,
+      embedder: options.embed === false ? null : choice?.provider ?? null,
+    });
+  }
+
   const report = await doctor(store, choice?.provider.identity ?? null);
+
+  // Built here for the same reason the scan is: closing this handle does not
+  // release the file at once on Windows, so a viewer that opened its own store
+  // succeeded or failed depending on timing.
+  let page: string | null = null;
+  if (scanned && options.ui !== false) {
+    try {
+      const { buildUi } = await import('./ui.js');
+      page = (await buildUi(store, dir)).file;
+    } catch (err) {
+      log('warn', 'could not write the viewer', err);
+    }
+  }
+
   await store.close();
-  return { storeDir: dir, report };
+  return { storeDir: dir, report, scanned, page };
 }
 
 export async function runIngest(

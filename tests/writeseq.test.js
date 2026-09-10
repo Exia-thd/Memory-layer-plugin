@@ -26,7 +26,7 @@ async function openStore(repo, options = {}) {
 test('C11-a: a failed write leaves both the data and the counter untouched', async () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['write', '--layer', 'semantic', '--title', 'Kept', '--body', 'This one lands.', '--source-ref', 'docs/a.md#L1-L2']);
 
     const before = seq(repo);
@@ -56,7 +56,7 @@ test('C11-a: a failed write leaves both the data and the counter untouched', asy
 test('C11-b: a commit that lands but cannot be announced fails loudly', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const metaDir = path.join(repo.dir, '.memory');
 
     // meta.json is written to a temporary file and renamed into place. Putting a
@@ -93,7 +93,7 @@ test('C11-b: a commit that lands but cannot be announced fails loudly', () => {
 test('C11-c: inside the transaction the counter has not moved yet', async () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const before = seq(repo);
     const store = await openStore(repo);
 
@@ -122,7 +122,7 @@ test('C11-c: inside the transaction the counter has not moved yet', async () => 
 test('C11-d: a write is visible to a process that starts afterwards', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const before = seq(repo);
 
     cli(repo, ['write', '--layer', 'semantic', '--title', 'Visible everywhere', '--body', 'Retries are capped at two.', '--source-ref', 'docs/a.md#L1-L2']);
@@ -138,7 +138,7 @@ test('C11-d: a write is visible to a process that starts afterwards', () => {
 test('C11-e: nested units of work commit once, with one counter advance', async () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const before = seq(repo);
     const store = await openStore(repo);
 
@@ -169,7 +169,7 @@ test('C11-e: nested units of work commit once, with one counter advance', async 
 test('C11-f: a read-only handle refuses to write rather than half-writing', async () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const store = await openStore(repo, { readOnly: true });
     await assert.rejects(store.transact(async () => undefined), /read-only/i);
     await store.close();

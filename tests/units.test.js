@@ -184,7 +184,7 @@ test('the recency branch requires a shared term', () => {
 test('re-ingesting unchanged content creates no duplicates', () => {
   const repo = makeRepo({ 'docs/a.md': '# Title\n\nA decision worth keeping.\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const first = JSON.parse(cli(repo, ['ingest', 'docs', '--json']));
     const second = JSON.parse(cli(repo, ['ingest', 'docs', '--json']));
 
@@ -203,7 +203,7 @@ test('re-ingesting unchanged content creates no duplicates', () => {
 test('every node written by ingest carries a traceable source_ref', () => {
   const repo = makeRepo({ 'docs/a.md': `# Title\n\n${'body text. '.repeat(300)}\n` });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
     const { results } = JSON.parse(cli(repo, ['search', 'body text', '--limit', '20', '--json']));
     assert.ok(results.length > 0);
@@ -218,7 +218,7 @@ test('every node written by ingest carries a traceable source_ref', () => {
 test('a memory cannot be written without provenance', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const result = cli(repo, ['write', '--layer', 'semantic', '--title', 'x', '--body', 'y'], { allowFailure: true });
     assert.fail(`writing without --source-ref succeeded: ${result}`);
   } catch (err) {
@@ -232,7 +232,7 @@ test('the search cache is dropped when the store is written to', async () => {
   const { MemoryStore, search, HashEmbeddingProvider } = await import('@memory-layer/core');
   const repo = makeRepo({ 'docs/a.md': '# Title\n\nAn early decision.\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['write', '--layer', 'semantic', '--title', 'First rule', '--body', 'Retries are capped.', '--source-ref', 'docs/a.md#L1-L2']);
 
     const dir = `${repo.dir}/.memory`;
@@ -257,7 +257,7 @@ test('the search cache is dropped when the store is written to', async () => {
 test('a layer filter narrows results without narrowing the search', () => {
   const repo = makeRepo({ 'docs/a.md': '# T\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['write', '--layer', 'semantic', '--title', 'Retry cap decision', '--body', 'Capped at two.', '--source-ref', 'docs/a.md#L1-L2']);
     cli(repo, ['write', '--layer', 'episodic', '--title', 'Retry storm incident', '--body', 'Retries flooded the processor.', '--source-ref', 'session:1']);
 

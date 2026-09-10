@@ -39,7 +39,7 @@ const ANY_AGE = '0.000001';
 test('nothing is pruned when nothing is old enough', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     write(repo, { layer: 'episodic', title: 'Lệnh hỏng', body: 'npm test thất bại.', sourceRef: 'session:2026-09-10' });
 
     const report = JSON.parse(cli(repo, ['prune', '--json']));
@@ -53,7 +53,7 @@ test('nothing is pruned when nothing is old enough', async () => {
 test('a decision is never pruned, however old', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     write(repo, { layer: 'semantic', title: 'Chỉ thử lại hai lần',
       body: 'Chọn thay vì backoff.', sourceRef: 'docs/a.md#L1-L1' });
 
@@ -69,7 +69,7 @@ test('a decision is never pruned, however old', async () => {
 test('a referenced memory is refused rather than quietly kept', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const error = write(repo, { layer: 'episodic', title: 'Double capture',
       body: 'Khoá dùng lại gây double-capture.', sourceRef: 'session:2026-01-01' });
     const decision = write(repo, { layer: 'semantic', title: 'Khoá theo từng lượt',
@@ -91,7 +91,7 @@ test('a referenced memory is refused rather than quietly kept', async () => {
 test('a dry run removes nothing', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const id = write(repo, { layer: 'episodic', title: 'Lệnh hỏng cũ',
       body: 'Một lỗi cũ.', sourceRef: 'session:2020-01-01' });
 
@@ -115,7 +115,7 @@ test('a dry run removes nothing', async () => {
 test('a nonsensical cutoff is refused', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     const run = cliRaw(repo, ['prune', '--older-than', '0', '--json']);
     assert.notEqual(run.status, 0, 'pruning everything from today was accepted');
     assert.match(`${run.stdout}${run.stderr}`, /greater than 0/);
@@ -131,7 +131,7 @@ test('a pruned memory leaves the keyword index consistent', async () => {
   // scores everything else against a wrong average -- with no error anywhere.
   const repo = makeRepo({ 'docs/a.md': '# A\n\nGhi chú.\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const doomed = write(repo, {

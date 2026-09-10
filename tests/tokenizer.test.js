@@ -93,7 +93,7 @@ test('search finds a Vietnamese decision by an unaccented query', async () => {
     ].join('\n'),
   });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs/adr.md']);
 
     const accented = JSON.parse(cli(repo, ['search', 'quyết định retry thẻ', '--json']));
@@ -109,7 +109,7 @@ test('search finds a Vietnamese decision by an unaccented query', async () => {
 test('doctor fails when the postings were built by another tokenizer', async () => {
   const repo = makeRepo({ 'docs/a.md': '# A\n\nQuyết định một.\n' });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs/a.md']);
 
     const clean = JSON.parse(cli(repo, ['doctor', '--json']));
@@ -142,7 +142,7 @@ test('an accented query ranks the word it actually asked for first', async () =>
     'docs/beef.md': '# Thịt bò\n\nMón phở bò truyền thống dùng thịt bò tươi.\n',
   });
   try {
-    cli(repo, ['init']);
+    cli(repo, ['init', '--no-scan']);
     cli(repo, ['ingest', 'docs']);
 
     const dropped = JSON.parse(cli(repo, ['search', 'bỏ', '--limit', '2', '--json']));
