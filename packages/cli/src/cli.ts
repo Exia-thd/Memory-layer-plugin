@@ -102,34 +102,34 @@ function formatIgnored(ignored: IgnoredFile[], verbose: boolean): string {
   return lines.join('\n');
 }
 
-const USAGE = `memory - project memory layer
+const USAGE = `dai-memory - project memory layer
 
-  memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
-  memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
+  dai-memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
+  dai-memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
                           [--verbose] [--quiet] [--max-file-size MB]  no paths: scan the project
-  memory embed [--force]              embed nodes missing a current vector
-  memory index <query> [--limit N] [--offset N] [--layer L] [--json]
+  dai-memory embed [--force]              embed nodes missing a current vector
+  dai-memory index <query> [--limit N] [--offset N] [--layer L] [--json]
                           titles only, ~15 tokens each -- pick before you read
-  memory search <query> [--limit N] [--offset N] [--layer L] [--json]
-  memory why <file|symbol> [--limit N] [--offset N] [--json]   decisions touching it
-  memory get <id> [--json]            one node plus its direct edges
-  memory graph <id> [--depth N] [--edge TYPE] [--json]
-  memory constraints [--limit N]      decisions in force, most important first
-  memory changes [--scope S] [--base R]  what memory records about your changed files
-  memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
-  memory prune [--older-than 90] [--dry-run]  forget old, unreferenced episodic memories
-  memory ui [path] [--out FILE]       build a browser view of the graph and the store
-  memory session start <label> | end [--summary S] | (none)   open, close or show the session
-  memory summarize <clusterId> --body S   record a summary for a group of memories
-  memory conflicts [--json]           contradictions needing a person
-  memory clusters [--json]            communities in the memory graph
-  memory write --layer L --title T --body B --source-ref R [--link ID:TYPE]
-  memory link <from> <to> <TYPE> [--weight W]
-  memory merge                        fold queued session writes into the store
-  memory doctor [--json]              what is actually working
-  memory list                         registered projects
-  memory forget [path]                drop a project from the registry
-  memory serve                        MCP server on stdio
+  dai-memory search <query> [--limit N] [--offset N] [--layer L] [--json]
+  dai-memory why <file|symbol> [--limit N] [--offset N] [--json]   decisions touching it
+  dai-memory get <id> [--json]            one node plus its direct edges
+  dai-memory graph <id> [--depth N] [--edge TYPE] [--json]
+  dai-memory constraints [--limit N]      decisions in force, most important first
+  dai-memory changes [--scope S] [--base R]  what memory records about your changed files
+  dai-memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
+  dai-memory prune [--older-than 90] [--dry-run]  forget old, unreferenced episodic memories
+  dai-memory ui [path] [--out FILE]       build a browser view of the graph and the store
+  dai-memory session start <label> | end [--summary S] | (none)   open, close or show the session
+  dai-memory summarize <clusterId> --body S   record a summary for a group of memories
+  dai-memory conflicts [--json]           contradictions needing a person
+  dai-memory clusters [--json]            communities in the memory graph
+  dai-memory write --layer L --title T --body B --source-ref R [--link ID:TYPE]
+  dai-memory link <from> <to> <TYPE> [--weight W]
+  dai-memory merge                        fold queued session writes into the store
+  dai-memory doctor [--json]              what is actually working
+  dai-memory list                         registered projects
+  dai-memory forget [path]                drop a project from the registry
+  dai-memory serve                        MCP server on stdio
 
 layers: ${LAYERS.join(', ')}
 edges:  ${EDGE_TYPES.join(', ')}`;
@@ -286,7 +286,7 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
         if (page) process.stdout.write(`open ${page}\n`);
       } else if (targets.length === 0 && !args.flags['no-scan']) {
         process.stdout.write(
-          '\nNothing conventional to scan here. Point it somewhere: memory ingest <paths>\n',
+          '\nNothing conventional to scan here. Point it somewhere: dai-memory ingest <paths>\n',
         );
       }
       return 0;
@@ -294,13 +294,13 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
 
     case 'ingest': {
       // No paths is the common case, not an error: the daily command should be
-      // `memory ingest`, deciding the same way init did rather than making the
+      // `dai-memory ingest`, deciding the same way init did rather than making the
       // user retype a list they already approved once.
       const paths = chooseScan(args, resolveProject().root);
       if (paths.length === 0) {
         throw new Error(
           'Nothing conventional to scan here, and nothing named. ' +
-            'Point it somewhere: memory ingest <paths>',
+            'Point it somewhere: dai-memory ingest <paths>',
         );
       }
       const report = await api.runIngest(paths, {
@@ -503,7 +503,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
                   // The detection already happened; recording it is one command
                   // away and used to be several. An unrecorded contradiction is
                   // found again from scratch every time somebody asks.
-                  `          memory link ${c.a.id} ${c.b.id} CONTRADICTS`,
+                  `          dai-memory link ${c.a.id} ${c.b.id} CONTRADICTS`,
               )
               .join('\n\n'),
       );
@@ -549,7 +549,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
 
       const result = await api.runWrite({ layer, title, body, sourceRef, links });
       emit(args, result, () =>
-        `${result.id}${result.queued ? ' (queued: the store was locked, run `memory merge`)' : ''}` +
+        `${result.id}${result.queued ? ' (queued: the store was locked, run `dai-memory merge`)' : ''}` +
         (result.about.length > 0 ? `\nanchored to ${result.about.join(', ')}` : '') +
         // Printed as commands rather than as advice. A suggestion that takes
         // three steps to act on is one nobody acts on, and an unlinked graph is
@@ -557,7 +557,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         (result.related.length > 0
           ? '\n\nrelated memories -- link them if they bear on each other:\n' +
             result.related
-              .map((r) => `  memory link ${result.id} ${r.id} DERIVED_FROM   # ${r.title}`)
+              .map((r) => `  dai-memory link ${result.id} ${r.id} DERIVED_FROM   # ${r.title}`)
               .join('\n')
           : '') +
         (result.redactions.length > 0
@@ -631,7 +631,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         if (report.stale.stale) {
           process.stdout.write(
             `index         WARN    built at ${report.stale.indexed?.slice(0, 8)}, HEAD is ` +
-              `${report.stale.head?.slice(0, 8)} -- re-run \`memory ingest\`\n`,
+              `${report.stale.head?.slice(0, 8)} -- re-run \`dai-memory ingest\`\n`,
           );
         }
       }
@@ -655,7 +655,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
                 const state = e.freshness.unavailable
                   ? `unreachable: ${e.freshness.unavailable}`
                   : e.freshness.stale
-                    ? 'STALE - re-run `memory ingest`'
+                    ? 'STALE - re-run `dai-memory ingest`'
                     : 'current';
                 return `${e.name.padEnd(24)}${nodes.padEnd(16)}${state.padEnd(34)}${e.path}`;
               })

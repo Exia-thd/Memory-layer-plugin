@@ -16,7 +16,7 @@ like that*.
 ## What it does
 
 ```
-$ memory why src/billing/retry.ts
+$ dai-memory why src/billing/retry.ts
 
  1. [semantic] Cap declined-card retries at two
     docs/billing.md#L3-L8
@@ -69,27 +69,27 @@ A task-by-task guide is in [docs/usage.md](docs/usage.md).
 
 | Command | Purpose |
 |---|---|
-| `memory init [paths...]` | Create the store, scan the project, build the code graph and the viewer |
-| `memory index <query>` | Titles only, ~15 tokens each — pick before you read |
-| `memory ingest [paths]` | Load files — no paths scans the project. Replaces what they produced before, reclaims what is gone, refreshes the viewer |
-| `memory search <query>` | Three-branch retrieval with a fusion report |
-| `memory why <file\|symbol> [--anchor-only]` | Decisions and constraints touching it — a bare symbol anchors on the declaration. `--anchor-only` skips the embedding model, which costs ~2.5 s |
-| `memory changes [--scope S]` | What memory records about the files you are about to commit |
-| `memory get <id>` | One node in full, with its edges |
-| `memory graph <id> --depth N` | Walk the memory graph |
-| `memory constraints` | What this project has already settled |
-| `memory conflicts` | Contradictions a person needs to resolve |
-| `memory map [path] [--format mermaid]` | The code graph: files, declarations, and the memory about each |
-| `memory clusters` | Communities in the memory graph, with any stored summary |
-| `memory summarize <id> --body S` | Record a summary for a group, linked to its members |
-| `memory session start\|end` | Open or close a session, so writes record when they happened |
-| `memory write` / `memory link` | Record a memory, or relate two |
-| `memory merge` | Fold queued session writes into the store |
-| `memory list` | Registered projects, with index freshness |
-| `memory ui [path] [--out FILE]` | Build a browser view: 3D graph, the store, and health |
-| `memory prune [--older-than N] [--dry-run]` | Forget old, unreferenced episodic memories |
-| `memory doctor` | What is actually working |
-| `memory serve` | MCP server on stdio |
+| `dai-memory init [paths...]` | Create the store, scan the project, build the code graph and the viewer |
+| `dai-memory index <query>` | Titles only, ~15 tokens each — pick before you read |
+| `dai-memory ingest [paths]` | Load files — no paths scans the project. Replaces what they produced before, reclaims what is gone, refreshes the viewer |
+| `dai-memory search <query>` | Three-branch retrieval with a fusion report |
+| `dai-memory why <file\|symbol> [--anchor-only]` | Decisions and constraints touching it — a bare symbol anchors on the declaration. `--anchor-only` skips the embedding model, which costs ~2.5 s |
+| `dai-memory changes [--scope S]` | What memory records about the files you are about to commit |
+| `dai-memory get <id>` | One node in full, with its edges |
+| `dai-memory graph <id> --depth N` | Walk the memory graph |
+| `dai-memory constraints` | What this project has already settled |
+| `dai-memory conflicts` | Contradictions a person needs to resolve |
+| `dai-memory map [path] [--format mermaid]` | The code graph: files, declarations, and the memory about each |
+| `dai-memory clusters` | Communities in the memory graph, with any stored summary |
+| `dai-memory summarize <id> --body S` | Record a summary for a group, linked to its members |
+| `dai-memory session start\|end` | Open or close a session, so writes record when they happened |
+| `dai-memory write` / `dai-memory link` | Record a memory, or relate two |
+| `dai-memory merge` | Fold queued session writes into the store |
+| `dai-memory list` | Registered projects, with index freshness |
+| `dai-memory ui [path] [--out FILE]` | Build a browser view: 3D graph, the store, and health |
+| `dai-memory prune [--older-than N] [--dry-run]` | Forget old, unreferenced episodic memories |
+| `dai-memory doctor` | What is actually working |
+| `dai-memory serve` | MCP server on stdio |
 
 ---
 
@@ -220,7 +220,7 @@ semantic ones do not. Decay demotes; it does not remove.
   and is now imported only by `serve`; the database binding loads on first use.
   What is left is node's own start, which a long-lived MCP server pays once and
   a CLI call pays every time.
-- **`memory list` is linear in projects.** Marginal cost measured 14.5 ms per
+- **`dai-memory list` is linear in projects.** Marginal cost measured 14.5 ms per
   project at five, 20.8 ms at fifty, despite a pool limit of eight: process
   spawn on Windows barely overlaps, so the pool buys close to nothing. Fifty
   projects take about 1.3 s. Usable, but not the concurrency the code implies.
@@ -239,10 +239,10 @@ semantic ones do not. Decay demotes; it does not remove.
   download failed as `File doesn't exist` -- which reads as a blocked network and
   was recorded as one. Override with `MEMORY_LAYER_MODEL_CACHE`.
 - **Automatic recording stays off by default.** It records an episodic memory
-  for every failed command, and most failures are typos. `memory prune` exists
+  for every failed command, and most failures are typos. `dai-memory prune` exists
   now, so this is a decision rather than a trap — but turn it on when pruning is
   a habit, not before.
-- **Summaries are written, never generated.** `memory summarize` stores a
+- **Summaries are written, never generated.** `dai-memory summarize` stores a
   summary the caller wrote and links it to the group members, so it survives the
   grouping being recomputed. Nothing in a read path calls a model. That is the
   line this project will not cross for a nicer name: retrieval over generated
@@ -250,7 +250,7 @@ semantic ones do not. Decay demotes; it does not remove.
   detection with a place to put a summary somebody wrote.
 - **No watch mode, on purpose.** A long-lived watcher would hold the store open
   to write, which is the reader-versus-writer collision this design avoids by
-  keeping every write a short-lived process. `memory ingest` is already
+  keeping every write a short-lived process. `dai-memory ingest` is already
   incremental through `fileHashes`; a watcher would buy convenience at the cost
   of the property that makes concurrent sessions safe.
 - **Clustering uses Louvain, not Leiden.** Louvain can produce a community that
@@ -266,16 +266,16 @@ semantic ones do not. Decay demotes; it does not remove.
   has never been measured. Adding concurrency to an unmeasured bottleneck is how
   you get a slower program with a lock bug in it.
 - **Journaled writes lag.** A write made while another process held the lock is
-  recorded but not searchable until `memory merge`. `doctor` reports the backlog.
+  recorded but not searchable until `dai-memory merge`. `doctor` reports the backlog.
 - **On Windows, one writable open per process.** A LadybugDB path opened for
   writing cannot be opened for writing again in the same process, even after
   `close()`; the second open is refused as though another process held the lock,
   and the process it names is this one. Read-only handles take a shared lock and
   are unaffected, so search, `why` and the reader's reopen-after-write are not.
 
-  A CLI command writes once and exits, so it never meets this. `memory serve`
+  A CLI command writes once and exits, so it never meets this. `dai-memory serve`
   does: the first write in a session commits and every later one is journaled,
-  reported as `queued` with a note, and counted by `doctor` until `memory merge`
+  reported as `queued` with a note, and counted by `doctor` until `dai-memory merge`
   runs from another process. Holding one writable handle open for the life of
   the server removes the queueing, and was measured and rejected -- an abrupt
   exit then leaves the write-ahead log un-checkpointed and the store does not

@@ -1,5 +1,5 @@
 ---
-name: memory-conflicts
+name: dai-memory-conflicts
 description: "Use when about to record or act on a project decision and it might clash with an earlier one, or when the user asks whether something contradicts an existing rule. Examples: \"does this conflict with anything?\", \"did we already decide this?\", \"is there an existing rule about this?\", \"are these two decisions compatible?\""
 ---
 
@@ -12,7 +12,7 @@ or not it is the one that survived.
 
 ## Before recording a decision
 
-1. Call `memory_conflicts` and check whether the subject already has a ruling.
+1. Call `dai_memory_conflicts` and check whether the subject already has a ruling.
 2. If it does and your new decision agrees, do not record a duplicate.
 3. If it does and your new decision disagrees, you have two choices, and they
    are different:

@@ -15,7 +15,7 @@ bao giờ nằm ở đó.
 cài plugin
         │
         ▼
-memory init ──────────────────────────────────────────┐
+dai-memory init ──────────────────────────────────────────┐
         │  tạo .memory/                              │
         │  dò xem nền này làm được gì                │  một lệnh
         │  quét docs/ src/ README.md …               │
@@ -30,16 +30,16 @@ làm việc ── plugin tự đọc, không cần bạn nhớ gì:
         │   trước Read/Grep     → memory biết gì về file đó
         │   trước git commit    → diff đang stage chạm vào gì
         ▼
-memory write ────────────── ghi một quyết định, bằng tay, kèm lý do
+dai-memory write ────────────── ghi một quyết định, bằng tay, kèm lý do
         │
         ▼
-memory ingest ───────────── sau khi file đổi (nên đặt vào post-commit)
+dai-memory ingest ───────────── sau khi file đổi (nên đặt vào post-commit)
         │  không tham số: chọn y như init đã chọn
         │  thu hồi file không còn trên đĩa
         │  thay thế những gì file đó từng sinh ra
         │  ghi lại ui.html
         ▼
-memory prune ────────────── thỉnh thoảng: dọn ghi chép episodic cũ, không ai trỏ tới
+dai-memory prune ────────────── thỉnh thoảng: dọn ghi chép episodic cũ, không ai trỏ tới
 ```
 
 Hai thứ tự động, hai thứ không, và sự phân chia đó là có chủ đích.
@@ -49,13 +49,13 @@ khi commit. Không phải nhớ gì.
 
 **Đánh chỉ mục là dữ liệu dẫn xuất**, nên cho nó tự chạy là an toàn — file mới là
 sự thật, chạy lại là idempotent, và cái duy nhất hỏng được là để nó lạc hậu. Đặt
-`memory ingest` vào `post-commit`.
+`dai-memory ingest` vào `post-commit`.
 
 **Ghi một quyết định là phán đoán**, nên nó nằm trong tay bạn. Lý do chọn phương
 án này thay vì phương án kia là phần không máy nào suy ra được, và đó cũng là
 phần duy nhất đáng lưu.
 
-**Quên cũng là phán đoán.** `memory prune` chỉ xoá ghi chép episodic cũ mà không
+**Quên cũng là phán đoán.** `dai-memory prune` chỉ xoá ghi chép episodic cũ mà không
 ai trỏ tới, và không bao giờ động vào một quyết định dù nó cũ đến đâu.
 
 ---
@@ -63,7 +63,7 @@ ai trỏ tới, và không bao giờ động vào một quyết định dù nó 
 ## Cài đặt, một lần cho mỗi dự án
 
 ```bash
-memory init
+dai-memory init
 ```
 
 Một lệnh. Nó tạo kho, dò xem nền này làm được gì, quét dự án, dựng code graph, và
@@ -76,8 +76,8 @@ thấy được chứ không âm thầm. Nó cố ý **không** quét `.`: quét
 code vendor và output build, và thứ đầu tiên bạn thấy sẽ là một kho đầy rác.
 
 ```bash
-memory init docs src/billing   # quét đúng những đường dẫn này
-memory init --no-scan          # chỉ tạo kho, quét sau
+dai-memory init docs src/billing   # quét đúng những đường dẫn này
+dai-memory init --no-scan          # chỉ tạo kho, quét sau
 ```
 
 Phần đáng đọc nhất là báo cáo năng lực — đây là chỗ duy nhất cho bạn biết tìm
@@ -108,7 +108,7 @@ Rồi mở trang nó vừa ghi:
 ## Giữ cho nó không lạc hậu
 
 ```bash
-memory ingest
+dai-memory ingest
 ```
 
 Chạy lại rẻ: hash nội dung khiến file không đổi bị bỏ qua, lượt thứ hai trên 47
@@ -131,7 +131,7 @@ lại là idempotent, và không có phán đoán nào trong đó. Cái duy nh�
 gì**.
 
 ```bash
-printf 'memory ingest --quiet || true\n' >> .git/hooks/post-commit
+printf 'dai-memory ingest --quiet || true\n' >> .git/hooks/post-commit
 chmod +x .git/hooks/post-commit
 ```
 
@@ -144,7 +144,7 @@ của bạn.
 máy nào suy ra được:
 
 ```bash
-memory write --layer semantic \
+dai-memory write --layer semantic \
   --title "Thử lại hai lần, không dùng exponential backoff" \
   --body "Cổng thanh toán đếm mỗi lần thử là một lượt authorise mới, nên backoff
           sẽ giữ tiền của khách hai lần." \
@@ -172,9 +172,9 @@ và cái nào cũng tự báo cáo:
 |---|---|---|
 | `.png` `.pdf` `.docx` `.zip` … | Không phải văn bản, chẳng có gì để index | Để AI đọc phân tích rồi ghi lại kết luận |
 | `.env` `.pem` lockfile `*.min.js` | Bí mật và sổ sách của máy | Cố ý. Một credential không được phép chạm tới embedding |
-| `.svg` `.drawio` `.puml` `.mermaid` | Bản xuất từ công cụ thiết kế / vẽ sơ đồ | `memory ingest docs/figma/tokens.svg` |
-| `.csv` `.tsv` `.rtf` | Tài liệu và dữ liệu bảng | `memory ingest docs/q1.csv` |
-| `node_modules` `dist` `build` `.git` … | Sinh tự động hoặc của bên thứ ba | `memory ingest docs/build` |
+| `.svg` `.drawio` `.puml` `.mermaid` | Bản xuất từ công cụ thiết kế / vẽ sơ đồ | `dai-memory ingest docs/figma/tokens.svg` |
+| `.csv` `.tsv` `.rtf` | Tài liệu và dữ liệu bảng | `dai-memory ingest docs/q1.csv` |
+| `node_modules` `dist` `build` `.git` … | Sinh tự động hoặc của bên thứ ba | `dai-memory ingest docs/build` |
 
 Markdown **không bao giờ** nằm trong mấy hàng đó. Nó chính là định dạng mà người
 ta chuyển mọi thứ sang để đọc được, nên nó luôn được quét vào.
@@ -184,13 +184,13 @@ một layout Android, một file config Spring là **một phần của cách h�
 không phải tài liệu nói về nó — chúng là mã nguồn và được nạp như mã nguồn.
 
 Word, Excel, PDF là **nhị phân**, nên có chỉ định đích danh cũng chẳng có gì để
-index. `memory ingest report.pdf` trước đây báo `1 new, 1 embedded` rồi nhét
-byte thô vào kho dưới dạng vector; giờ nó **từ chối** và chỉ sang `memory write`.
+index. `dai-memory ingest report.pdf` trước đây báo `1 new, 1 embedded` rồi nhét
+byte thô vào kho dưới dạng vector; giờ nó **từ chối** và chỉ sang `dai-memory write`.
 Gọi đích danh thắng được **chính sách**, không thắng được **vật lý**.
 
 Hai hàng giữa mới là phần cần hiểu. Một bản xuất thiết kế hay một file PDF thường
 không đáng lưu nguyên: thứ đáng giữ là **kết luận** ai đó rút ra từ nó, ghi bằng
-`memory write` kèm `--source-ref` trỏ ngược về file. Vài nghìn mảnh toạ độ đường
+`dai-memory write` kèm `--source-ref` trỏ ngược về file. Vài nghìn mảnh toạ độ đường
 vẽ không phải là kết luận. Nhưng đôi khi chính file đó là tài liệu tham chiếu, và
 **gọi đích danh thì luôn thắng** — thắng luật này, thắng danh sách chặn thư mục,
 và thắng cả ngưỡng dung lượng.
@@ -227,42 +227,42 @@ tay trông y hệt nhau, chỉ bạn mới biết cái nào là cái nào.
 
 ## Bốn thứ bạn thực sự sẽ chạy
 
-### `memory why <file|symbol>`
+### `dai-memory why <file|symbol>`
 
 Dự án đã quyết gì về đoạn code này. Đường dẫn thì neo theo nguồn gốc, tên trần
 thì neo theo khai báo:
 
 ```bash
-memory why src/charge.js
-memory why chargeInvoice
+dai-memory why src/charge.js
+dai-memory why chargeInvoice
 ```
 
 Đọc dòng `fusion` ở cuối. `degraded: semantic` nghĩa là nhánh đó không tìm ra gì,
 hoặc bị bỏ qua — câu trả lời đến từ ít nguồn hơn vẻ ngoài của nó.
 
-### `memory changes`
+### `dai-memory changes`
 
 Trước khi commit. Đây là lúc ký ức đáng giá nhất: không phải lúc khám phá, mà
 đúng ngay trước khi một thay đổi hạ cánh và mâu thuẫn với thứ ai đó đã quyết và
 đã ghi lại.
 
 ```bash
-memory changes                          # đang stage
-memory changes --scope compare --base main
+dai-memory changes                          # đang stage
+dai-memory changes --scope compare --base main
 ```
 
 Nó cũng liệt kê những file **không** có gì được ghi nhận. Đó là cố ý: "memory
 không tìm thấy gì" và "chưa ai hỏi memory" mà chỉ hiện phần tìm thấy thì nhìn
 giống hệt nhau.
 
-### `memory map`
+### `dai-memory map`
 
 Code graph — file nào khai báo gì, và ký ức nào nói về từng cái.
 
 ```bash
-memory map                        # dạng cây, để đọc
-memory map src/store              # thu hẹp theo đường dẫn
-memory map --format mermaid       # sơ đồ, để nhìn
+dai-memory map                        # dạng cây, để đọc
+dai-memory map src/store              # thu hẹp theo đường dẫn
+dai-memory map --format mermaid       # sơ đồ, để nhìn
 ```
 
 Bản Mermaid render được ở bất cứ đâu markdown chạy. Dán vào README, vào issue,
@@ -275,19 +275,19 @@ graph LR
   F0S0 -.->|about| F0S0M0["Retry policy"]
 ```
 
-### `memory ui`
+### `dai-memory ui`
 
 Một file HTML, dữ liệu nhúng sẵn. Không server, không bước build — mở thẳng từ ổ
 đĩa.
 
 ```bash
-memory ui                     # ghi .memory/ui.html
-memory ui src/store           # thu hẹp theo đường dẫn
-memory ui --out graph.html    # chỗ nào tiện gửi cho người khác
+dai-memory ui                     # ghi .memory/ui.html
+dai-memory ui src/store           # thu hẹp theo đường dẫn
+dai-memory ui --out graph.html    # chỗ nào tiện gửi cho người khác
 ```
 
-**Nó sinh ra lúc nào:** `memory init` ghi nó, và mọi lần `ingest` hay `prune` có
-thay đổi gì đều ghi lại. Bạn hiếm khi phải gõ `memory ui` — lệnh đó để xem một
+**Nó sinh ra lúc nào:** `dai-memory init` ghi nó, và mọi lần `ingest` hay `prune` có
+thay đổi gì đều ghi lại. Bạn hiếm khi phải gõ `dai-memory ui` — lệnh đó để xem một
 phần thu hẹp, hoặc để lấy một bản gửi cho ai đó.
 
 **Reload trình duyệt có cập nhật không? Không, và không thể.** Dữ liệu được nhúng
@@ -324,18 +324,18 @@ liệu nằm inline nên chạy bình thường.
 Trên 1500 node, nó giữ phần quan trọng nhất và **nói đã bỏ bao nhiêu**. Thu hẹp
 bằng đường dẫn.
 
-### `memory doctor`
+### `dai-memory doctor`
 
 Cái gì đang thực sự chạy. Chạy khi kết quả có vẻ sai, và chạy trong CI:
 
 | Dòng | Nghĩa là gì khi nó kêu |
 |---|---|
 | `embeddings WARN hash` | Model không nạp được; tìm kiếm ngữ nghĩa đang là từ vựng |
-| `tokenizer version FAIL` | Postings cũ hơn bản build này — `memory ingest --force` |
-| `model drift WARN` | Vector đã lưu thuộc model khác — `memory embed --force` |
+| `tokenizer version FAIL` | Postings cũ hơn bản build này — `dai-memory ingest --force` |
+| `model drift WARN` | Vector đã lưu thuộc model khác — `dai-memory embed --force` |
 | `keyword index WARN` | Một số node vô hình với tìm kiếm từ khoá |
-| `index WARN` | Chỉ mục lùi sau HEAD — `memory ingest` |
-| `journal WARN` | Lệnh ghi đang xếp hàng sau khoá — `memory merge` |
+| `index WARN` | Chỉ mục lùi sau HEAD — `dai-memory ingest` |
+| `journal WARN` | Lệnh ghi đang xếp hàng sau khoá — `dai-memory merge` |
 
 Một dòng `FAIL` nên làm đỏ build của bạn. Mỗi dòng ở đây đều mô tả một kiểu tìm
 kiếm **sai âm thầm**, không phải hỏng ồn ào.
@@ -345,9 +345,9 @@ kiếm **sai âm thầm**, không phải hỏng ồn ào.
 ## Quên
 
 ```bash
-memory prune --dry-run            # xem trước cái gì sẽ đi
-memory prune                      # episodic, cũ hơn 90 ngày, không ai trỏ tới
-memory prune --older-than 30
+dai-memory prune --dry-run            # xem trước cái gì sẽ đi
+dai-memory prune                      # episodic, cũ hơn 90 ngày, không ai trỏ tới
+dai-memory prune --older-than 30
 ```
 
 Ba điều kiện, bắt buộc cả ba, không cái nào lỡ tay tắt được:
@@ -412,7 +412,7 @@ Project memory has 9 entries about src/charge.js, showing 3:
 - [semantic] Chốt ở hai lần, không backoff (docs/adr-001.md#L12-L20)
 - [decision] ...
 - [episodic] ...
-6 more not shown: memory_why src/charge.js
+6 more not shown: dai_memory_why src/charge.js
 ```
 
 | Biến | Mặc định | Áp cho |
@@ -425,15 +425,15 @@ Hai tính chất quan trọng hơn con số. **Mục đầu tiên luôn được
 "file này không có ghi chép nào", tức là ngược hẳn sự thật. Và **file không có
 gì ghi thì hook vẫn im hoàn toàn**, nên chi phí luôn tỉ lệ với mức hữu ích.
 
-`memory search` và `memory why` giờ trả thêm `total` và `omitted` trong `--json`
-vì cùng lý do đó. `memory changes` đã báo số bỏ sót từ ngày nó được viết; đúng
+`dai-memory search` và `dai-memory why` giờ trả thêm `total` và `omitted` trong `--json`
+vì cùng lý do đó. `dai-memory changes` đã báo số bỏ sót từ ngày nó được viết; đúng
 hai lệnh mà hook gọi thì lại không.
 
 ### GraphRAG, giờ mới thật sự truy xuất
 
 `search.ts` **không duyệt một cạnh nào**. Mọi liên kết ghi giữa các quyết định —
-SUPERSEDES, CONTRADICTS, DERIVED_FROM — chỉ ảnh hưởng tới `memory conflicts` và
-`memory graph`, không ảnh hưởng gì tới kết quả tìm kiếm. Gọi thứ đó là GraphRAG
+SUPERSEDES, CONTRADICTS, DERIVED_FROM — chỉ ảnh hưởng tới `dai-memory conflicts` và
+`dai-memory graph`, không ảnh hưởng gì tới kết quả tìm kiếm. Gọi thứ đó là GraphRAG
 là hứa một điều không xảy ra.
 
 Fusion giờ có **nhánh thứ tư**. Nó đi **một bước** từ những gì ba nhánh kia tìm
@@ -463,7 +463,7 @@ hệt một nhánh chạy rồi không khớp:
 graphWalk  ok  one-hop-neighbours
 fusion: bm25=3 semantic=3 recency=3 graph=0
         graph: Nothing the other branches found is linked to anything.
-               Record links with `memory link`.
+               Record links with `dai-memory link`.
 ```
 
 `graph` trong báo cáo sức khoẻ là **engine cơ sở dữ liệu**; `graphWalk` là
@@ -476,19 +476,19 @@ Nhánh graph truy xuất **theo cạnh**, mà cho tới giờ **không có gì t
 `ABOUT` chỉ do ingest ghi, nên một quyết định viết tay — loại ký ức giá trị nhất —
 **không có đường nào** đi tới hàm mà nó nói về: đồ thị giữ symbol, kho giữ quyết
 định, hai thứ nằm cùng một file mà không nối. Cạnh giữa các ký ức còn tệ hơn, vì
-nó cần ai đó **nhớ gõ** `memory link` đúng lúc — mà một tính năng chỉ chạy khi
+nó cần ai đó **nhớ gõ** `dai-memory link` đúng lúc — mà một tính năng chỉ chạy khi
 người dùng nhớ ra là nó tồn tại thì phần lớn thời gian là không chạy.
 
 **Thứ suy ra được thì suy ra.** Một `source_ref` có khoảng dòng đã tự nói nó phủ
 lên khai báo nào:
 
 ```bash
-memory write --layer semantic   --title "Chốt ở hai lần, không backoff"   --body "Cổng thanh toán đếm mỗi lần thử là một lượt authorise mới."   --source-ref "src/charge.js#L1-L3"
+dai-memory write --layer semantic   --title "Chốt ở hai lần, không backoff"   --body "Cổng thanh toán đếm mỗi lần thử là một lượt authorise mới."   --source-ref "src/charge.js#L1-L3"
 
 # anchored to chargeInvoice
 ```
 
-`memory why chargeInvoice` giờ trả về quyết định đó, dù quyết định **không hề
+`dai-memory why chargeInvoice` giờ trả về quyết định đó, dù quyết định **không hề
 nhắc tên hàm**. Khoảng dòng không phủ khai báo nào thì không neo gì, và cũng
 không kêu ca — cả hai đều là chuyện bình thường.
 
@@ -497,27 +497,27 @@ không kêu ca — cả hai đều là chuyện bình thường.
 
 ```
 related memories -- link them if they bear on each other:
-  memory link mem_7f2 mem_3a9 DERIVED_FROM   # Chốt ở hai lần trên cổng thanh toán
+  dai-memory link mem_7f2 mem_3a9 DERIVED_FROM   # Chốt ở hai lần trên cổng thanh toán
 ```
 
 **Gợi ý, không bao giờ tự tạo.** Nhánh graph truy xuất **xuyên qua** cạnh, nên
 một cạnh đoán sai không nằm im vô hại: nó kéo một quyết định chẳng liên quan vào
 kết quả suốt đời kho, và không thứ gì phía sau phân biệt được cạnh đoán với cạnh
-có cân nhắc. `memory conflicts` cũng in lệnh `CONTRADICTS` theo cách đó — trước
+có cân nhắc. `dai-memory conflicts` cũng in lệnh `CONTRADICTS` theo cách đó — trước
 đây nó phát hiện mâu thuẫn rồi để việc ghi lại cho người dùng tự lo, nên cùng một
 cặp bị phát hiện lại từ đầu mỗi lần có người hỏi.
 
 ### Chọn trước, đọc sau
 
 Một kết quả đầy đủ mang theo 220 ký tự trích đoạn, tốn chừng sáu mươi token.
-`memory index` trả về **cùng thứ hạng** nhưng chỉ có tiêu đề, lớp và source_ref —
+`dai-memory index` trả về **cùng thứ hạng** nhưng chỉ có tiêu đề, lớp và source_ref —
 khoảng **mười lăm** token — nên ngân sách trước đây hiện được sáu mục thì giờ phủ
 hơn hai mươi:
 
 ```bash
-memory index "retry"            # danh sách tiêu đề để chọn
-memory search "retry"           # đọc kỹ những cái đáng, có trích đoạn
-memory get <id>                 # một cái, đầy đủ
+dai-memory index "retry"            # danh sách tiêu đề để chọn
+dai-memory search "retry"           # đọc kỹ những cái đáng, có trích đoạn
+dai-memory get <id>                 # một cái, đầy đủ
 ```
 
 Cả hai đều nhận `--offset`. `3 more of 9 not shown -- --offset 6` giờ là thứ bạn
@@ -539,15 +539,15 @@ src/generated/
 
 Các danh sách dựng sẵn là phỏng đoán về repo nói chung, mà phỏng đoán về repo nói
 chung thì sai với từng repo cụ thể. File này **không bao giờ thắng** một đường dẫn
-được gọi đích danh — `memory ingest docs/exports` vẫn đọc thư mục đó dù luật nói
+được gọi đích danh — `dai-memory ingest docs/exports` vẫn đọc thư mục đó dù luật nói
 gì, vì một chỉ thị đưa ra **bây giờ** đứng trên một luật viết **từ trước**.
 
 ## Nhiều dự án
 
 ```bash
 memory register     # thêm dự án này vào registry chung
-memory list         # mọi dự án, kèm độ tươi của chỉ mục
-memory forget       # bỏ khỏi registry (kho vẫn còn)
+dai-memory list         # mọi dự án, kèm độ tươi của chỉ mục
+dai-memory forget       # bỏ khỏi registry (kho vẫn còn)
 ```
 
 Tìm kiếm **không** đi xuyên dự án. Đó là mặc định và là cố ý: ký ức từ repo của
@@ -576,11 +576,11 @@ như mạng bị chặn, mà không phải vậy.
 
 ## Khi kết quả có vẻ sai
 
-1. **`memory doctor`.** Phần lớn nằm ở một trong các dòng của bảng trên.
+1. **`dai-memory doctor`.** Phần lớn nằm ở một trong các dòng của bảng trên.
 2. **Đọc dòng `fusion`.** `degraded` gọi tên mọi nhánh không đóng góp gì. Ba
    nhánh rỗng và một kết quả yếu thì không phải câu trả lời chắc chắn.
 3. **Kiểm `source_ref`.** Nếu nó trỏ vào dòng đã dịch chuyển thì chỉ mục lạc hậu
-   — chạy `memory ingest`.
+   — chạy `dai-memory ingest`.
 4. **Thử hỏi không dấu.** Tiếng Việt được đánh chỉ mục cả hai dạng, nên
    `quyet dinh` tìm ra `quyết định`. Nếu câu có dấu chạy mà câu không dấu không
    chạy, postings đang thuộc tokenizer đời cũ.

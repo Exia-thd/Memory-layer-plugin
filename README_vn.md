@@ -16,7 +16,7 @@ hỏi khác, vòng đời khác; cái này trả lời *vì sao nó lại như v
 ## Nó làm gì
 
 ```
-$ memory why src/billing/retry.ts
+$ dai-memory why src/billing/retry.ts
 
  1. [semantic] Chốt retry thẻ bị từ chối ở hai lần
     docs/billing.md#L3-L8
@@ -67,27 +67,27 @@ Hướng dẫn theo từng việc, kể cả nên tự động hoá cái gì và
 
 | Lệnh | Làm gì |
 |---|---|
-| `memory init [paths...]` | Tạo kho, quét dự án, dựng code graph và trang xem |
-| `memory index <query>` | Chỉ tiêu đề, ~15 token mỗi mục — chọn trước khi đọc |
-| `memory ingest [paths]` | Nạp file — không tham số thì tự quét dự án. Thay thế bản cũ, thu hồi thứ đã biến mất, ghi lại trang xem |
-| `memory search <query>` | Truy hồi ba nhánh, kèm báo cáo hợp nhất |
-| `memory why <file\|symbol>` | Quyết định và ràng buộc chạm tới nó |
-| `memory changes [--scope S]` | Ký ức nói gì về những file bạn sắp commit |
-| `memory get <id>` | Một node đầy đủ, kèm cạnh của nó |
-| `memory graph <id> --depth N` | Duyệt đồ thị ký ức |
-| `memory constraints` | Những gì dự án đã chốt |
-| `memory conflicts` | Mâu thuẫn cần người quyết |
-| `memory map [path] [--format mermaid]` | Code graph: file, khai báo, và ký ức về từng cái |
-| `memory clusters` | Cụm trong đồ thị ký ức, kèm tóm tắt nếu có |
-| `memory summarize <id> --body S` | Ghi tóm tắt cho một cụm, nối vào các thành viên |
-| `memory session start\|end` | Mở/đóng phiên, để lệnh ghi biết nó xảy ra lúc nào |
-| `memory write` / `memory link` | Ghi một ký ức, hoặc nối hai ký ức |
-| `memory merge` | Gộp các lệnh ghi đang xếp hàng vào kho |
-| `memory list` | Các dự án đã đăng ký, kèm độ tươi của chỉ mục |
-| `memory ui [path] [--out FILE]` | Dựng trang xem: đồ thị 3D, kho, sức khoẻ |
-| `memory prune [--older-than N] [--dry-run]` | Quên ghi chép episodic cũ, không ai trỏ tới |
-| `memory doctor` | Cái gì đang thực sự chạy |
-| `memory serve` | MCP server trên stdio |
+| `dai-memory init [paths...]` | Tạo kho, quét dự án, dựng code graph và trang xem |
+| `dai-memory index <query>` | Chỉ tiêu đề, ~15 token mỗi mục — chọn trước khi đọc |
+| `dai-memory ingest [paths]` | Nạp file — không tham số thì tự quét dự án. Thay thế bản cũ, thu hồi thứ đã biến mất, ghi lại trang xem |
+| `dai-memory search <query>` | Truy hồi ba nhánh, kèm báo cáo hợp nhất |
+| `dai-memory why <file\|symbol>` | Quyết định và ràng buộc chạm tới nó |
+| `dai-memory changes [--scope S]` | Ký ức nói gì về những file bạn sắp commit |
+| `dai-memory get <id>` | Một node đầy đủ, kèm cạnh của nó |
+| `dai-memory graph <id> --depth N` | Duyệt đồ thị ký ức |
+| `dai-memory constraints` | Những gì dự án đã chốt |
+| `dai-memory conflicts` | Mâu thuẫn cần người quyết |
+| `dai-memory map [path] [--format mermaid]` | Code graph: file, khai báo, và ký ức về từng cái |
+| `dai-memory clusters` | Cụm trong đồ thị ký ức, kèm tóm tắt nếu có |
+| `dai-memory summarize <id> --body S` | Ghi tóm tắt cho một cụm, nối vào các thành viên |
+| `dai-memory session start\|end` | Mở/đóng phiên, để lệnh ghi biết nó xảy ra lúc nào |
+| `dai-memory write` / `dai-memory link` | Ghi một ký ức, hoặc nối hai ký ức |
+| `dai-memory merge` | Gộp các lệnh ghi đang xếp hàng vào kho |
+| `dai-memory list` | Các dự án đã đăng ký, kèm độ tươi của chỉ mục |
+| `dai-memory ui [path] [--out FILE]` | Dựng trang xem: đồ thị 3D, kho, sức khoẻ |
+| `dai-memory prune [--older-than N] [--dry-run]` | Quên ghi chép episodic cũ, không ai trỏ tới |
+| `dai-memory doctor` | Cái gì đang thực sự chạy |
+| `dai-memory serve` | MCP server trên stdio |
 
 ---
 
@@ -216,7 +216,7 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
   `serve` import nó; binding database nạp khi dùng lần đầu. Phần còn lại là thời
   gian khởi động của node — MCP server sống lâu trả một lần, còn lệnh CLI trả
   mỗi lần.
-- **`memory list` tuyến tính theo số dự án.** Chi phí biên đo được 14,5 ms/dự án
+- **`dai-memory list` tuyến tính theo số dự án.** Chi phí biên đo được 14,5 ms/dự án
   ở mức năm, 20,8 ms ở mức năm mươi, dù pool giới hạn tám: spawn tiến trình trên
   Windows gần như không chồng lấn, nên pool gần như không mua được gì. Năm mươi
   dự án mất khoảng 1,3 s. Dùng được, nhưng không phải mức song song mà code ngụ ý.
@@ -234,10 +234,10 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
   hỏng với thông báo `File doesn't exist` — đọc y hệt như mạng bị chặn, và đã
   từng bị ghi nhận nhầm là vậy. Ghi đè bằng `MEMORY_LAYER_MODEL_CACHE`.
 - **Ghi tự động vẫn tắt mặc định.** Nó ghi một ký ức episodic cho **mỗi** lệnh
-  thất bại, mà phần lớn thất bại là gõ nhầm. Giờ đã có `memory prune` nên đây là
+  thất bại, mà phần lớn thất bại là gõ nhầm. Giờ đã có `dai-memory prune` nên đây là
   một lựa chọn chứ không phải cái bẫy — nhưng hãy bật khi prune đã thành thói
   quen, đừng bật trước.
-- **Tóm tắt là do người viết, không sinh tự động.** `memory summarize` lưu tóm
+- **Tóm tắt là do người viết, không sinh tự động.** `dai-memory summarize` lưu tóm
   tắt mà người gọi viết và nối nó vào các thành viên của cụm, nên nó sống sót khi
   cụm được tính lại. Không có gì trên đường đọc gọi model. Đây là ranh giới dự án
   này không vượt để đổi lấy một cái tên đẹp hơn: truy hồi trên các bản tóm tắt
@@ -245,7 +245,7 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
   chỗ để đặt bản tóm tắt do người viết.
 - **Không có watch mode, cố ý.** Một watcher sống lâu sẽ phải giữ kho mở để ghi,
   đúng va chạm reader-vs-writer mà thiết kế này né được bằng cách giữ mọi lệnh
-  ghi là tiến trình ngắn hạn. `memory ingest` vốn đã incremental qua `fileHashes`;
+  ghi là tiến trình ngắn hạn. `dai-memory ingest` vốn đã incremental qua `fileHashes`;
   một watcher chỉ mua sự tiện lợi bằng cách trả đi tính chất khiến nhiều phiên
   chạy an toàn.
 - **Phân cụm dùng Louvain, không phải Leiden.** Louvain có thể sinh ra cộng đồng
@@ -254,13 +254,13 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
   cần tới.
 - **Cột web chưa tồn tại.** Sigma.js, front end React và agent LangChain đều chưa
   dựng: kế hoạch nói đừng bắt đầu trước khi CLI xong, và điều đó vẫn đúng.
-  Visualization dễ làm và dễ bị nhầm là tiến độ. (`memory ui` đã đủ để nhìn.)
+  Visualization dễ làm và dễ bị nhầm là tiến độ. (`dai-memory ui` đã đủ để nhìn.)
 - **Nhúng chạy một luồng.** Worker pool là bước tiếp theo hiển nhiên, nhưng chi
   phí nó tiết kiệm chưa từng được đo. Thêm song song vào một nút thắt chưa đo là
   cách có một chương trình chậm hơn kèm một bug khoá.
 - **Lệnh ghi vào nhật ký thì trễ.** Một lệnh ghi thực hiện khi tiến trình khác
   đang giữ khoá sẽ được ghi lại nhưng chưa tìm kiếm được cho tới khi chạy
-  `memory merge`. `doctor` báo số lượng đang tồn.
+  `dai-memory merge`. `doctor` báo số lượng đang tồn.
 - **Trên Windows, một tiến trình chỉ mở ghi được một lần.** Một đường dẫn
   LadybugDB đã mở để ghi thì không mở ghi lại được trong cùng tiến trình, kể cả
   sau `close()`; lần mở thứ hai bị từ chối như thể tiến trình khác đang giữ khoá,
@@ -269,9 +269,9 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
   thường.
 
   Một lệnh CLI ghi một lần rồi thoát nên không bao giờ gặp chuyện này.
-  `memory serve` thì có: lần ghi đầu tiên trong phiên được commit, mọi lần sau
+  `dai-memory serve` thì có: lần ghi đầu tiên trong phiên được commit, mọi lần sau
   vào nhật ký, báo là `queued` kèm ghi chú, và được `doctor` đếm cho tới khi
-  `memory merge` chạy từ một tiến trình khác. Giữ một handle ghi mở suốt đời
+  `dai-memory merge` chạy từ một tiến trình khác. Giữ một handle ghi mở suốt đời
   server sẽ bỏ được hàng đợi — phương án đó **đã đo và đã loại**: thoát đột ngột
   sẽ để write-ahead log chưa checkpoint và kho **không mở lại được**, một kiểu
   hỏng tệ hơn nhiều so với một hàng đợi nhìn thấy được. Nhật ký là kiểu xuống cấp

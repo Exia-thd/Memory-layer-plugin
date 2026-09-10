@@ -45,7 +45,7 @@ const SESSION_TOKEN_BUDGET = Number(process.env.MEMORY_LAYER_SESSION_TOKENS ?? 7
  * twenty -- which is the difference between handing the agent a few entries and
  * handing it the shape of what is recorded, to choose from.
  *
- * The snippets are not lost. `memory_get` and `memory_why` fetch them for the
+ * The snippets are not lost. `dai_memory_get` and `dai_memory_why` fetch them for the
  * entries worth opening, which is the point: pick from a list, then read.
  */
 
@@ -124,7 +124,7 @@ async function sessionStart(cwd) {
         : 'Active constraints recorded for this project:',
     );
     lines.push(...kept);
-    if (dropped > 0) lines.push(`${dropped} more: memory_constraints`);
+    if (dropped > 0) lines.push(`${dropped} more: dai_memory_constraints`);
   }
 
   const unresolved = conflicts ?? [];
@@ -133,7 +133,7 @@ async function sessionStart(cwd) {
     for (const conflict of unresolved.slice(0, 5)) {
       lines.push(`- ${conflict.a.title}  <->  ${conflict.b.title}`);
     }
-    lines.push('Run memory_conflicts for the full list before recording new decisions.');
+    lines.push('Run dai_memory_conflicts for the full list before recording new decisions.');
   }
 
   if (lines.length === 0) return;
@@ -181,8 +181,8 @@ async function preTool(cwd, payload) {
       : `Project memory has ${kept.length} entr${kept.length === 1 ? 'y' : 'ies'} about ${target}:`,
     ...kept,
   ];
-  if (unseen > 0) lines.push(`${unseen} more not shown: memory_why ${target}`);
-  lines.push('Call memory_why for the full reasoning before changing this.');
+  if (unseen > 0) lines.push(`${unseen} more not shown: dai_memory_why ${target}`);
+  lines.push('Call dai_memory_why for the full reasoning before changing this.');
 
   emit({
     hookSpecificOutput: {

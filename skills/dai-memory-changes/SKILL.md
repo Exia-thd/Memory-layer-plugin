@@ -1,5 +1,5 @@
 ---
-name: memory-changes
+name: dai-memory-changes
 description: "Use before committing, or when the user asks whether a change is safe, conflicts with an earlier decision, or has been decided before. Examples: \"can I commit this?\", \"does this contradict anything?\", \"is there a decision about these files?\", \"review my changes\", \"anything I should know before I push?\""
 ---
 
@@ -18,14 +18,14 @@ exploring — then it is merely useful.
 ## Workflow
 
 ```
-1. memory_changes({scope: "staged"})     → what memory covers the staged files
+1. dai_memory_changes({scope: "staged"})     → what memory covers the staged files
 2. Read every CONTESTED entry            → a contradiction is a person's call
-3. memory_get on anything that applies   → the full reasoning, not the title
+3. dai_memory_get on anything that applies   → the full reasoning, not the title
 4. Report to the user before committing
 ```
 
 For a branch review rather than a commit, use
-`memory_changes({scope: "compare", base_ref: "main"})`.
+`dai_memory_changes({scope: "compare", base_ref: "main"})`.
 
 ## Reading the result
 

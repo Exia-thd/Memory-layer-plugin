@@ -11,12 +11,12 @@ behind the user's back is exactly the kind of thing a memory layer should not do
 ```markdown
 ## Always Do
 
-- **MUST run memory_why before changing code you did not write.** Code that looks
+- **MUST run dai_memory_why before changing code you did not write.** Code that looks
   arbitrary is the strongest signal that a reason exists and has been lost.
-- **MUST check memory_conflicts before recording a new decision.** Two live
+- **MUST check dai_memory_conflicts before recording a new decision.** Two live
   decisions covering the same ground, neither aware of the other, is the failure
   this layer exists to catch.
-- **MUST run memory_changes before committing.** It is the one moment memory is
+- **MUST run dai_memory_changes before committing.** It is the one moment memory is
   worth the most: just before a change lands that may contradict a decision
   somebody already made and wrote down.
 - **MUST cite the source_ref** of anything memory returned when acting on it.
@@ -31,7 +31,7 @@ behind the user's back is exactly the kind of thing a memory layer should not do
 - **NEVER resolve a CONTRADICTS pair on your own.** Surface it; a person decides.
 - **NEVER record a decision without a source_ref.** A memory nobody can trace
   back cannot be checked, and will be believed anyway.
-- **NEVER delete a memory to make a contradiction go away.** `memory prune` only
+- **NEVER delete a memory to make a contradiction go away.** `dai-memory prune` only
   removes old episodic notes nothing points at; a decision you disagree with is
   superseded, with a link saying so.
 - **NEVER record secrets, credentials, or anything unverified.** A memory layer
@@ -58,7 +58,7 @@ holds in front of it.
 ## Keeping it honest
 
 Every one of these layers is a confident liar if the store is out of date, so
-`memory_search` and `memory_why` attach an `index.stale` block when the store was
+`dai_memory_search` and `dai_memory_why` attach an `index.stale` block when the store was
 built at an older commit, and individual results older than the staleness
 threshold are marked. Guidance that tells an agent to trust memory, without
 memory telling it when not to, is worse than no guidance.

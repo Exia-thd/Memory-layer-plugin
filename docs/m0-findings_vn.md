@@ -108,10 +108,10 @@ cache cũng không thể sống lâu hơn lần ghi làm nó vô hiệu.
 ### Lệnh ghi không lấy được khoá
 
 Hook phiên ghi trong khi phiên khác có thể đang ghi. Thay vì đi dò khoá, lệnh ghi
-gặp `StoreLockedError` sẽ nối vào **nhật ký theo phiên**, và `memory merge` gộp
+gặp `StoreLockedError` sẽ nối vào **nhật ký theo phiên**, và `dai-memory merge` gộp
 lại sau. Người gọi **được báo** là đã xếp hàng — một ký ức đã ghi nhưng chưa tìm
 kiếm được là kết quả khác với một ký ức đang sống, và khác biệt đó quan trọng với
-người vừa ghi nó. `memory doctor` báo số đang tồn nên độ trễ không bao giờ vô
+người vừa ghi nó. `dai-memory doctor` báo số đang tồn nên độ trễ không bao giờ vô
 hình.
 
 ---

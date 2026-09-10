@@ -1,5 +1,5 @@
 {
-  "memory-layer": {
+  "dai-memory": {
     "command": "node",
     "args": ["${CLAUDE_PLUGIN_ROOT}/packages/cli/dist/cli.js", "serve"],
     "env": {

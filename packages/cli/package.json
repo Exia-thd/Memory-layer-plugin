@@ -2,7 +2,7 @@
   "name": "@memory-layer/cli",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "memory": "./dist/cli.js" },
+  "bin": { "dai-memory": "./dist/cli.js" },
   "files": ["dist"],
   "scripts": { "build": "tsc -b", "test": "node --test ../../tests/*.test.js" },
   "dependencies": {

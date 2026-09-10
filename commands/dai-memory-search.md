@@ -4,7 +4,7 @@ description: Search project memory for decisions, incidents and constraints
 
 Search this project's memory for: $ARGUMENTS
 
-Use the `memory_search` tool. Then report back:
+Use the `dai_memory_search` tool. Then report back:
 
 1. The matching memories, each with its `source_ref` and layer.
 2. Any entry marked `stale`, flagged as such.

@@ -1,5 +1,5 @@
 ---
-name: memory-why
+name: dai-memory-why
 description: "Use when someone asks why code is the way it is, who decided something, or what the reasoning behind an existing choice was, and before changing code they did not write. Examples: \"why does this retry twice?\", \"who decided we use this processor?\", \"is there a reason this is hardcoded?\", \"what was the thinking here?\", \"any history on this file?\""
 ---
 
@@ -10,16 +10,16 @@ that matters when deciding whether a change is safe.
 
 ## When to use this
 
-Reach for `memory_why` before editing code you did not write, and whenever a
+Reach for `dai_memory_why` before editing code you did not write, and whenever a
 piece of code looks wrong, arbitrary, or needlessly cautious. Code that looks
 arbitrary is the strongest signal that a reason exists and has been lost.
 
 ## How to use it
 
-1. Call `memory_why` with the file path or symbol name.
+1. Call `dai_memory_why` with the file path or symbol name.
 2. Read the `semantic` results first: those are decisions and constraints. The
    `episodic` results are what went wrong to prompt them.
-3. Follow `memory_neighbors` from an interesting node when you want the chain --
+3. Follow `dai_memory_neighbors` from an interesting node when you want the chain --
    a decision usually `RESOLVES` an error and is sometimes `SUPERSEDES`-ed by a
    later one.
 

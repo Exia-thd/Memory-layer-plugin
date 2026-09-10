@@ -16,7 +16,7 @@ That is what this stores, and everything below follows from it.
 install the plugin
         │
         ▼
-memory init ──────────────────────────────────────────┐
+dai-memory init ──────────────────────────────────────────┐
         │  creates .memory/                          │
         │  probes what this platform can do          │  one command
         │  scans docs/ src/ README.md …              │
@@ -31,16 +31,16 @@ work ── the plugin reads on its own:
         │   before Read/Grep   → what memory knows about that file
         │   before git commit  → what the staged diff touches
         ▼
-memory write ────────────── a decision, by hand, with the reason
+dai-memory write ────────────── a decision, by hand, with the reason
         │
         ▼
-memory ingest ───────────── after files change (put it in post-commit)
+dai-memory ingest ───────────── after files change (put it in post-commit)
         │  no paths: the same choice init made
         │  replaces what those files produced before
         │  reclaims files that are no longer on disk
         │  rewrites ui.html
         ▼
-memory prune ────────────── occasionally: old episodic notes nothing points at
+dai-memory prune ────────────── occasionally: old episodic notes nothing points at
 ```
 
 Two things are automatic and two are not, and the split is deliberate.
@@ -50,13 +50,13 @@ read, and before a commit. Nothing to remember.
 
 **Indexing is derived data**, so letting it run itself is safe — the files are
 the truth, re-indexing is idempotent, and the only failure is falling behind.
-Put `memory ingest` in `post-commit`.
+Put `dai-memory ingest` in `post-commit`.
 
 **Writing a decision is a judgement**, so it stays in your hands. The reason a
 choice was made over the alternative is the part no machine can infer, and it is
 the only part worth storing.
 
-**Forgetting is a judgement too.** `memory prune` removes only old episodic notes
+**Forgetting is a judgement too.** `dai-memory prune` removes only old episodic notes
 that nothing points at, and it will not touch a decision however old it gets.
 
 ---
@@ -64,7 +64,7 @@ that nothing points at, and it will not touch a decision however old it gets.
 ## Setup, once per project
 
 ```bash
-memory init
+dai-memory init
 ```
 
 Creates the store in `.memory/`, probes what this platform can actually do,
@@ -88,7 +88,7 @@ differently from the text. The first run downloads about 23 MB into
 Then load the project:
 
 ```bash
-memory ingest
+dai-memory ingest
 ```
 
 Re-running is cheap. Content hashes mean an unchanged file is skipped, so a
@@ -104,7 +104,7 @@ goes wrong is letting it fall behind, and a stale index answers questions about
 last week's code without saying so.
 
 ```bash
-printf 'memory ingest --quiet || true\n' >> .git/hooks/post-commit
+printf 'dai-memory ingest --quiet || true\n' >> .git/hooks/post-commit
 chmod +x .git/hooks/post-commit
 ```
 
@@ -116,7 +116,7 @@ lock, and that is exactly when files changed in a way worth recording. The
 is the part no machine can infer:
 
 ```bash
-memory write --layer semantic \
+dai-memory write --layer semantic \
   --title "Retry twice, not exponential backoff" \
   --body "The gateway counts each attempt as a new authorisation, so backoff
           would hold customer funds twice." \
@@ -144,9 +144,9 @@ every one of them reports itself:
 |---|---|---|
 | `.png` `.pdf` `.docx` `.zip` … | Not text; there is nothing to index | Read it with an agent and record the conclusion |
 | `.env` `.pem` lockfiles `*.min.js` | Credentials and machine bookkeeping | Deliberate. A credential must not reach an embedding |
-| `.svg` `.drawio` `.puml` `.mermaid` | Exports from a design or diagram tool | `memory ingest docs/figma/tokens.svg` |
-| `.csv` `.tsv` `.rtf` | Documents and tabular data | `memory ingest docs/q1.csv` |
-| `node_modules` `dist` `build` `.git` … | Generated or vendored | `memory ingest docs/build` |
+| `.svg` `.drawio` `.puml` `.mermaid` | Exports from a design or diagram tool | `dai-memory ingest docs/figma/tokens.svg` |
+| `.csv` `.tsv` `.rtf` | Documents and tabular data | `dai-memory ingest docs/q1.csv` |
+| `node_modules` `dist` `build` `.git` … | Generated or vendored | `dai-memory ingest docs/build` |
 
 Markdown is never in these rows. It is the format things get converted into
 precisely so they can be read, so it is always swept up.
@@ -156,13 +156,13 @@ template, an Android layout and a Spring config are part of how the thing
 works, not documents about it -- they are source, and they are indexed like it.
 
 Word, Excel and PDF are binary, so there is nothing to index even when you name
-one. `memory ingest report.pdf` used to report `1 new, 1 embedded` and store the
-raw bytes as a vector; it now refuses and points at `memory write`. Naming a
+one. `dai-memory ingest report.pdf` used to report `1 new, 1 embedded` and store the
+raw bytes as a vector; it now refuses and points at `dai-memory write`. Naming a
 file overrules policy, not physics.
 
 The middle rows are the ones to understand. A design export or a PDF is usually not
 worth storing whole: what is worth keeping is the conclusion somebody drew from
-it, written with `memory write` and a `--source-ref` pointing back at the file.
+it, written with `dai-memory write` and a `--source-ref` pointing back at the file.
 A few thousand chunks of path coordinates are not that. But sometimes the file
 itself is the reference, and naming it outright always wins -- over this rule,
 over the directory block list, and over the size guard.
@@ -199,43 +199,43 @@ identical from here and only you know which it is.
 
 ## The four things you will actually run
 
-### `memory why <file|symbol>`
+### `dai-memory why <file|symbol>`
 
 What the project already decided about this code. A path anchors on provenance,
 a bare name anchors on the declaration:
 
 ```bash
-memory why src/charge.js
-memory why chargeInvoice
+dai-memory why src/charge.js
+dai-memory why chargeInvoice
 ```
 
 Read the `fusion` line at the bottom. `degraded: semantic` means that branch
 found nothing, or was skipped — the answer came from fewer sources than it
 looks.
 
-### `memory changes`
+### `dai-memory changes`
 
 Before committing. This is the moment memory is worth the most: not while
 exploring, but just before a change lands that contradicts something somebody
 already decided and wrote down.
 
 ```bash
-memory changes                          # staged
-memory changes --scope compare --base main
+dai-memory changes                          # staged
+dai-memory changes --scope compare --base main
 ```
 
 It also lists changed files with **nothing** recorded. That is deliberate:
 "memory found nothing" and "memory was never asked" look identical if only hits
 are shown.
 
-### `memory map`
+### `dai-memory map`
 
 The code graph — which files declare what, and which memory is about each.
 
 ```bash
-memory map                        # a tree, to read
-memory map src/store              # narrowed to a path
-memory map --format mermaid       # a diagram, to look at
+dai-memory map                        # a tree, to read
+dai-memory map src/store              # narrowed to a path
+dai-memory map --format mermaid       # a diagram, to look at
 ```
 
 The Mermaid output renders anywhere markdown does. Paste it into a README, an
@@ -248,19 +248,19 @@ graph LR
   F0S0 -.->|about| F0S0M0["Retry policy"]
 ```
 
-### `memory ui`
+### `dai-memory ui`
 
 One HTML file with everything baked in. No server, no build step — open it from
 the filesystem.
 
 ```bash
-memory ui                     # writes .memory/ui.html
-memory ui src/store           # narrowed to a path
-memory ui --out graph.html    # somewhere you can mail it
+dai-memory ui                     # writes .memory/ui.html
+dai-memory ui src/store           # narrowed to a path
+dai-memory ui --out graph.html    # somewhere you can mail it
 ```
 
-**When it appears:** `memory init` writes it, and every `ingest` or `prune` that
-changed something rewrites it. You rarely run `memory ui` by hand — it is there
+**When it appears:** `dai-memory init` writes it, and every `ingest` or `prune` that
+changed something rewrites it. You rarely run `dai-memory ui` by hand — it is there
 for a narrowed view, or a copy to send somebody.
 
 **Does reloading update it? No, and it cannot.** The data is baked into the file.
@@ -290,7 +290,7 @@ page to somebody who wanted a white one.
 process, which is what lets several sessions run at once without fighting over
 the store — a page holding a write connection would break exactly that. Where an
 action would change something, the page gives you the command. Re-run
-`memory ui` after changing the store.
+`dai-memory ui` after changing the store.
 
 The 3D view fetches its library from a CDN, so the first open needs a network.
 If it cannot, the page says which of the two things went wrong instead of
@@ -301,18 +301,18 @@ way; their data is inline.
 Above 1500 nodes it keeps the most important and says how many it dropped.
 Narrow it with a path.
 
-### `memory doctor`
+### `dai-memory doctor`
 
 What is actually working. Run it when results feel wrong, and in CI:
 
 | Line | Meaning when it complains |
 |---|---|
 | `embeddings WARN hash` | The model did not load; semantic search is lexical |
-| `tokenizer version FAIL` | Postings predate this build — `memory ingest --force` |
-| `model drift WARN` | Stored vectors are from another model — `memory embed --force` |
+| `tokenizer version FAIL` | Postings predate this build — `dai-memory ingest --force` |
+| `model drift WARN` | Stored vectors are from another model — `dai-memory embed --force` |
 | `keyword index WARN` | Some nodes are invisible to keyword search |
-| `index WARN` | The index is behind HEAD — `memory ingest` |
-| `journal WARN` | Writes queued behind a lock — `memory merge` |
+| `index WARN` | The index is behind HEAD — `dai-memory ingest` |
+| `journal WARN` | Writes queued behind a lock — `dai-memory merge` |
 
 A `FAIL` should fail your build. Every one of these describes a way search goes
 quietly wrong rather than loudly broken.
@@ -322,9 +322,9 @@ quietly wrong rather than loudly broken.
 ## Forgetting
 
 ```bash
-memory prune --dry-run            # what would go
-memory prune                      # episodic, older than 90 days, unreferenced
-memory prune --older-than 30
+dai-memory prune --dry-run            # what would go
+dai-memory prune                      # episodic, older than 90 days, unreferenced
+dai-memory prune --older-than 30
 ```
 
 Three conditions, all required, none configurable away by accident:
@@ -390,7 +390,7 @@ Project memory has 9 entries about src/charge.js, showing 3:
 - [semantic] Retry twice, not exponential backoff (docs/adr-001.md#L12-L20)
 - [decision] ...
 - [episodic] ...
-6 more not shown: memory_why src/charge.js
+6 more not shown: dai_memory_why src/charge.js
 ```
 
 | Variable | Default | Covers |
@@ -404,15 +404,15 @@ memory into "this file has no recorded reasoning" -- the opposite of the truth.
 And a file with nothing recorded still produces no output at all, so the cost
 stays proportional to how useful the answer was.
 
-`memory search` and `memory why` carry `total` and `omitted` in `--json` for the
-same reason. `memory changes` had reported an omitted count since it was
+`dai-memory search` and `dai-memory why` carry `total` and `omitted` in `--json` for the
+same reason. `dai-memory changes` had reported an omitted count since it was
 written; the two commands the hooks actually call did not.
 
 ### GraphRAG, actually retrieving
 
 `search.ts` traversed zero edges. Every link recorded between decisions --
-SUPERSEDES, CONTRADICTS, DERIVED_FROM -- affected `memory conflicts` and
-`memory graph` and nothing else, so the edges had no bearing on what a search
+SUPERSEDES, CONTRADICTS, DERIVED_FROM -- affected `dai-memory conflicts` and
+`dai-memory graph` and nothing else, so the edges had no bearing on what a search
 returned. Calling that GraphRAG promised something that was not happening.
 
 Fusion now has a fourth branch. It walks one hop out from what the other three
@@ -442,7 +442,7 @@ that reads like a branch that ran and matched nothing:
 graphWalk  ok  one-hop-neighbours
 fusion: bm25=3 semantic=3 recency=3 graph=0
         graph: Nothing the other branches found is linked to anything.
-               Record links with `memory link`.
+               Record links with `dai-memory link`.
 ```
 
 `graph` in the health report is the database engine; `graphWalk` is this branch.
@@ -456,19 +456,19 @@ The graph branch retrieves along edges, and until now nothing created them.
 -- the most valuable kind of memory there is -- had no route to the function it
 was about: the graph held the symbol, the store held the decision, and the two
 sat in the same file unconnected. Memory-to-memory links were worse, because
-they needed somebody to type `memory link` at the right moment, and a feature
+they needed somebody to type `dai-memory link` at the right moment, and a feature
 that works only when the user recalls it exists mostly does not work.
 
 **What is derivable is derived.** A `source_ref` with a line span already says
 which declarations it covers:
 
 ```bash
-memory write --layer semantic   --title "Retry twice, not backoff"   --body "The gateway counts each attempt as a new authorisation."   --source-ref "src/charge.js#L1-L3"
+dai-memory write --layer semantic   --title "Retry twice, not backoff"   --body "The gateway counts each attempt as a new authorisation."   --source-ref "src/charge.js#L1-L3"
 
 # anchored to chargeInvoice
 ```
 
-`memory why chargeInvoice` now returns that decision, though the decision never
+`dai-memory why chargeInvoice` now returns that decision, though the decision never
 mentions the function by name. A span that covers nothing anchors nothing, and
 says nothing about it -- both are ordinary.
 
@@ -476,13 +476,13 @@ says nothing about it -- both are ordinary.
 
 ```
 related memories -- link them if they bear on each other:
-  memory link mem_7f2 mem_3a9 DERIVED_FROM   # Retry twice on the payment gateway
+  dai-memory link mem_7f2 mem_3a9 DERIVED_FROM   # Retry twice on the payment gateway
 ```
 
 Suggested, never created. The graph branch retrieves *through* edges, so a
 guessed edge does not sit there harmlessly: it pulls an unrelated decision into
 results for the rest of the store's life, and nothing downstream can tell a
-guess from a judgement. `memory conflicts` prints its `CONTRADICTS` command the
+guess from a judgement. `dai-memory conflicts` prints its `CONTRADICTS` command the
 same way -- it had been detecting contradictions and leaving the recording as an
 exercise, so the same pair was rediscovered from scratch every time.
 
@@ -493,9 +493,9 @@ index` returns the same ranking with title, layer and source_ref only -- roughly
 fifteen -- so a budget that showed six entries now covers more than twenty:
 
 ```bash
-memory index "retry"            # titles, to choose from
-memory search "retry"           # the ones worth reading, with snippets
-memory get <id>                 # one, in full
+dai-memory index "retry"            # titles, to choose from
+dai-memory search "retry"           # the ones worth reading, with snippets
+dai-memory get <id>                 # one, in full
 ```
 
 Both take `--offset`. `3 more of 9 not shown -- --offset 6` is now something you
@@ -517,7 +517,7 @@ src/generated/
 
 The built-in lists are guesses about repositories in general, and a guess about
 repositories in general is wrong about every particular one. This file never
-overrules a path named outright -- `memory ingest docs/exports` reads that
+overrules a path named outright -- `dai-memory ingest docs/exports` reads that
 directory whatever the rules say, because an instruction given now outranks a
 standing one written earlier.
 
@@ -525,8 +525,8 @@ standing one written earlier.
 
 ```bash
 memory register     # add this project to the global registry
-memory list         # every project, with index freshness
-memory forget       # remove it from the registry (the store stays)
+dai-memory list         # every project, with index freshness
+dai-memory forget       # remove it from the registry (the store stays)
 ```
 
 Search does not cross projects. That is the default and it is deliberate: memory
@@ -556,11 +556,11 @@ reads exactly like a blocked network and is not one.
 
 ## When results look wrong
 
-1. **`memory doctor`.** Most of it is one of the rows in that table.
+1. **`dai-memory doctor`.** Most of it is one of the rows in that table.
 2. **Read the `fusion` line.** `degraded` names every branch that contributed
    nothing. Three empty branches and one weak hit is not a confident answer.
 3. **Check `source_ref`.** If it points at a line that moved, the index is
-   behind — `memory ingest`.
+   behind — `dai-memory ingest`.
 4. **Ask without accents.** Vietnamese indexes both forms, so `quyet dinh`
    finds `quyết định`. If the accented query works and the plain one does not,
    the postings are from an older tokenizer.

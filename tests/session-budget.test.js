@@ -87,14 +87,14 @@ test('an oversized result is trimmed and says so', () => {
       snippet: 'x'.repeat(120),
     })),
   };
-  const text = budgeted('memory_search', payload);
+  const text = budgeted('dai_memory_search', payload);
 
-  assert.ok(text.includes('memory_truncated'), 'truncation was silent');
+  assert.ok(text.includes('dai_memory_truncated'), 'truncation was silent');
   assert.match(text, /item\(s\) were dropped/);
   // The scalar context survives, so the agent can read what is left.
   assert.match(text, /"scope": "staged"/);
 
-  const body = text.split('\n\nmemory_truncated')[0];
+  const body = text.split('\n\ndai_memory_truncated')[0];
   assert.ok(
     body.length <= OUTPUT_BUDGET_BYTES * 1.1,
     `trimmed body is still ${body.length} bytes`,
@@ -103,7 +103,7 @@ test('an oversized result is trimmed and says so', () => {
 });
 
 test('a small result is returned whole, with no notice', () => {
-  const text = budgeted('memory_get', { id: 'mem_1', title: 'Short' });
+  const text = budgeted('dai_memory_get', { id: 'mem_1', title: 'Short' });
   assert.equal(text, JSON.stringify({ id: 'mem_1', title: 'Short' }, null, 2));
-  assert.ok(!text.includes('memory_truncated'));
+  assert.ok(!text.includes('dai_memory_truncated'));
 });

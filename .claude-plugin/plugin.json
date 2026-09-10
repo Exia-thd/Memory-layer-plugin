@@ -1,5 +1,5 @@
 {
-  "name": "memory-layer",
+  "name": "dai-memory",
   "version": "0.1.0",
   "description": "Project memory: records why decisions were made, what broke, and which constraints apply, then retrieves them when the agent needs the reasoning behind unfamiliar code.",
   "author": { "name": "memory-layer contributors" },

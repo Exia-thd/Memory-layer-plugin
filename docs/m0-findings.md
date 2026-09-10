@@ -113,10 +113,10 @@ outlive the write that invalidated it either.
 
 Session hooks write while other sessions may be writing. Rather than probe for
 the lock, a write that hits `StoreLockedError` appends to a per-session
-journal, and `memory merge` folds it in later. The caller is **told** it was
+journal, and `dai-memory merge` folds it in later. The caller is **told** it was
 queued — a memory that is recorded but not yet searchable is a different
 outcome from one that is live, and the difference matters to whoever wrote it.
-`memory doctor` reports the pending count so the lag is never invisible.
+`dai-memory doctor` reports the pending count so the lag is never invisible.
 
 ---
 

@@ -120,7 +120,7 @@ test('the pre-tool hook says how many entries it did not show', async () => {
         { MEMORY_LAYER_HOOK_TOKENS: '60' }),
     );
     assert.match(text, /Project memory has \d+ entries about src\/charge\.js, showing \d+:/, text);
-    assert.match(text, /\d+ more not shown: memory_why src\/charge\.js/, text);
+    assert.match(text, /\d+ more not shown: dai_memory_why src\/charge\.js/, text);
   } finally {
     repo.cleanup();
   }
@@ -153,7 +153,7 @@ test('the session-start hook budgets constraints and names the tail', async () =
 
     const text = context(hook(repo, 'session-start', {}, { MEMORY_LAYER_SESSION_TOKENS: '60' }));
     assert.match(text, /Active constraints recorded for this project \(\d+ of \d+\):/, text);
-    assert.match(text, /\d+ more: memory_constraints/, text);
+    assert.match(text, /\d+ more: dai_memory_constraints/, text);
   } finally {
     repo.cleanup();
   }

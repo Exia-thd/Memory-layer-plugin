@@ -11,13 +11,13 @@ người ta đúng là kiểu việc mà một tầng ký ức không nên làm.
 ```markdown
 ## Always Do
 
-- **MUST run memory_why before changing code you did not write.** Code trông có
+- **MUST run dai_memory_why before changing code you did not write.** Code trông có
   vẻ tuỳ tiện chính là tín hiệu mạnh nhất rằng từng có một lý do, và lý do đó đã
   thất lạc.
-- **MUST check memory_conflicts before recording a new decision.** Hai quyết định
+- **MUST check dai_memory_conflicts before recording a new decision.** Hai quyết định
   còn hiệu lực cùng phủ một vùng, không cái nào biết cái kia, chính là kiểu hỏng
   mà tầng này sinh ra để bắt.
-- **MUST run memory_changes before committing.** Đây là lúc ký ức đáng giá nhất:
+- **MUST run dai_memory_changes before committing.** Đây là lúc ký ức đáng giá nhất:
   ngay trước khi một thay đổi hạ cánh và mâu thuẫn với thứ ai đó đã quyết và đã
   ghi lại.
 - **MUST cite the source_ref** của bất cứ thứ gì ký ức trả về khi hành động dựa
@@ -31,7 +31,7 @@ người ta đúng là kiểu việc mà một tầng ký ức không nên làm.
 - **NEVER treat a memory result as current state.** Nó mô tả điều đã đúng **vào
   lúc được ghi**. Kiểm lại với cây mã nguồn.
 - **NEVER resolve a CONTRADICTS pair on your own.** Đưa nó ra; người quyết.
-- **NEVER delete a memory to make a contradiction go away.** `memory prune` chỉ
+- **NEVER delete a memory to make a contradiction go away.** `dai-memory prune` chỉ
   xoá ghi chép episodic cũ mà không ai trỏ tới; một quyết định bạn không đồng ý
   thì dùng `SUPERSEDES` kèm lý do.
 - **NEVER record a decision without a source_ref.** Ký ức không truy ngược được
@@ -59,7 +59,7 @@ hỏi đang thực sự được đặt ra — rồi đặt thứ ký ức đang
 ## Giữ cho nó không nói dối
 
 Mỗi lớp trong số này đều là một kẻ nói dối tự tin nếu kho lạc hậu, nên
-`memory_search` và `memory_why` gắn kèm khối `index.stale` khi kho được dựng ở
+`dai_memory_search` và `dai_memory_why` gắn kèm khối `index.stale` khi kho được dựng ở
 một commit cũ hơn, và từng kết quả cũ hơn ngưỡng đều bị đánh dấu.
 
 Hướng dẫn bảo agent hãy tin ký ức, mà ký ức không tự nói khi nào **đừng** tin,

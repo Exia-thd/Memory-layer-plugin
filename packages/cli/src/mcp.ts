@@ -17,7 +17,7 @@ import { isStale, storeDirOrThrow } from './project.js';
 
 const TOOLS = [
   {
-    name: 'memory_search',
+    name: 'dai_memory_search',
     description:
       'Search project memory for decisions, errors, constraints and past sessions. ' +
       'Returns ranked results plus a fusion report saying which retrieval branches contributed.',
@@ -36,7 +36,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_why',
+    name: 'dai_memory_why',
     description:
       'Why is this code the way it is? Returns the decisions and constraints touching a ' +
       'file path or symbol, with the errors they were made in response to. ' +
@@ -51,7 +51,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_get',
+    name: 'dai_memory_get',
     description: 'Fetch one memory node in full, with its direct edges.',
     inputSchema: {
       type: 'object',
@@ -60,7 +60,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_neighbors',
+    name: 'dai_memory_neighbors',
     description:
       'Walk the memory graph out from a node. Traversal is bidirectional, so asking from ' +
       'an error reaches the decision that resolved it.',
@@ -75,7 +75,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_write',
+    name: 'dai_memory_write',
     description:
       'Record a decision, error, constraint or procedure. Always include the reason it was ' +
       'chosen over the alternative -- a decision without its reason cannot be re-evaluated later. ' +
@@ -110,7 +110,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_link',
+    name: 'dai_memory_link',
     description: 'Link two memory nodes with a typed relationship.',
     inputSchema: {
       type: 'object',
@@ -124,7 +124,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_constraints',
+    name: 'dai_memory_constraints',
     description:
       'The decisions and constraints currently in force for this project, most important ' +
       'first. Use at the start of a task to learn what the project has already settled.',
@@ -134,7 +134,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_map',
+    name: 'dai_memory_map',
     description:
       'The code graph: which files declare what, and which memory is about each ' +
       'declaration. Use to get oriented in an unfamiliar area before reading files ' +
@@ -148,7 +148,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_clusters',
+    name: 'dai_memory_clusters',
     description:
       'Groups of related memories, with the summary somebody wrote for each group ' +
       'if one exists. Use for a broad question about an area rather than one symbol. ' +
@@ -156,9 +156,9 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { min_size: { type: 'number' } } },
   },
   {
-    name: 'memory_summarize',
+    name: 'dai_memory_summarize',
     description:
-      'Record a summary you wrote for a group from memory_clusters. The body is ' +
+      'Record a summary you wrote for a group from dai_memory_clusters. The body is ' +
       'yours: this tool stores it and links it to the group members, so it survives ' +
       'the grouping being recomputed. Read the members before writing one.',
     inputSchema: {
@@ -172,7 +172,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_changes',
+    name: 'dai_memory_changes',
     description:
       'What memory already records about the files this change touches. Run before ' +
       'committing: it is the moment a change can contradict a decision someone made ' +
@@ -186,7 +186,7 @@ const TOOLS = [
     },
   },
   {
-    name: 'memory_conflicts',
+    name: 'dai_memory_conflicts',
     description:
       'Contradictions between recorded decisions that a person needs to settle. ' +
       'Check this before recording a new decision.',
@@ -215,7 +215,7 @@ export async function serve(): Promise<void> {
       const message = err instanceof Error ? err.message : String(err);
       log('error', `tool ${name} failed`, err);
       return {
-        content: [{ type: 'text', text: `memory_error: ${message}` }],
+        content: [{ type: 'text', text: `dai_memory_error: ${message}` }],
         isError: true,
       };
     }
@@ -244,7 +244,7 @@ export function budgeted(tool: string, payload: unknown): string {
   const notice =
     `
 
-memory_truncated: ${tool} produced ${full.length} bytes, over the ` +
+dai_memory_truncated: ${tool} produced ${full.length} bytes, over the ` +
     `${OUTPUT_BUDGET_BYTES}-byte budget. ${trimmed.dropped} item(s) were dropped from ` +
     'the end of the longest list. Narrow the query, or raise MEMORY_LAYER_OUTPUT_BUDGET.';
   return text + notice;
@@ -289,7 +289,7 @@ function trimArrays(payload: unknown, budget: number): { value: unknown; dropped
 
 async function dispatch(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
-    case 'memory_search': {
+    case 'dai_memory_search': {
       const result = await api.runSearch(String(args.query ?? ''), {
         limit: numeric(args.limit),
         layers: args.layers as Layer[] | undefined,
@@ -297,24 +297,24 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
       return withFreshness(result);
     }
 
-    case 'memory_why': {
+    case 'dai_memory_why': {
       const result = await api.runWhy(String(args.target ?? ''), { limit: numeric(args.limit) });
       return withFreshness(result);
     }
 
-    case 'memory_get': {
+    case 'dai_memory_get': {
       const found = await api.runGet(String(args.id ?? ''));
       if (!found) throw new Error(`No such memory node: ${args.id}`);
       return found;
     }
 
-    case 'memory_neighbors':
+    case 'dai_memory_neighbors':
       return api.runNeighbors(String(args.id ?? ''), {
         depth: numeric(args.depth),
         edgeTypes: args.edge_types as EdgeType[] | undefined,
       });
 
-    case 'memory_write': {
+    case 'dai_memory_write': {
       const result = await api.runWrite({
         layer: args.layer as Layer,
         title: String(args.title ?? ''),
@@ -336,18 +336,18 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
         // reasoning is still in hand -- is the one moment linking is cheap.
         suggestion: result.related.length > 0
           ? `${result.related.length} existing memor${result.related.length === 1 ? 'y is' : 'ies are'} ` +
-            'close to this one. If any of them bears on this decision, call memory_link -- ' +
+            'close to this one. If any of them bears on this decision, call dai_memory_link -- ' +
             'search retrieves one hop along those links, so an unlinked decision is found ' +
             'only by its own wording.'
           : undefined,
       };
     }
 
-    case 'memory_link': {
+    case 'dai_memory_link': {
       const result = await api.runLink(String(args.from ?? ''), String(args.to ?? ''), args.type as EdgeType, {
         weight: numeric(args.weight),
       });
-      // Reported the way memory_write reports it. An edge that went to the
+      // Reported the way dai_memory_write reports it. An edge that went to the
       // journal is recorded but not yet traversable, and saying so is the
       // difference between a queued write and one the caller thinks landed.
       return {
@@ -359,34 +359,34 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
       };
     }
 
-    case 'memory_constraints':
+    case 'dai_memory_constraints':
       return { constraints: await api.runConstraints({ limit: numeric(args.limit) }) };
 
-    case 'memory_map': {
+    case 'dai_memory_map': {
       const { runMap, formatMapMermaid } = await import('./map.js');
       const map = await runMap({ prefix: args.prefix as string | undefined });
       return args.format === 'mermaid' ? { mermaid: formatMapMermaid(map) } : map;
     }
 
-    case 'memory_clusters':
+    case 'dai_memory_clusters':
       return { clusters: await api.runClusters() };
 
-    case 'memory_summarize': {
+    case 'dai_memory_summarize': {
       if (typeof args.cluster_id !== 'number' || typeof args.body !== 'string') {
-        throw new Error('memory_summarize needs cluster_id and body.');
+        throw new Error('dai_memory_summarize needs cluster_id and body.');
       }
       return await api.runSummarize(args.cluster_id, args.body, {
         title: args.title as string | undefined,
       });
     }
 
-    case 'memory_changes':
+    case 'dai_memory_changes':
       return await api.runChanges({
         scope: args.scope as 'staged' | 'working' | 'compare' | undefined,
         baseRef: args.base_ref as string | undefined,
       });
 
-    case 'memory_conflicts':
+    case 'dai_memory_conflicts':
       return { conflicts: await api.runConflicts() };
 
     default:

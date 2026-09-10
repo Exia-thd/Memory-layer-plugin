@@ -170,11 +170,11 @@ test('C7: everything writable is readable back through a path that is exercised'
     const b = write(repo, 'episodic', 'Merchant account flagged', 'Three retries tripped the heuristic.', 'session:1');
     cli(repo, ['link', a, b, 'RESOLVES']);
 
-    // memory_write -> memory_get / memory_search
+    // dai_memory_write -> dai_memory_get / dai_memory_search
     const got = JSON.parse(cli(repo, ['get', a, '--json']));
     assert.equal(got.node.id, a);
 
-    // memory_link -> memory_neighbors
+    // dai_memory_link -> dai_memory_neighbors
     const graph = JSON.parse(cli(repo, ['graph', a, '--json']));
     assert.equal(graph.neighbors.length, 1);
 
