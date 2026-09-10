@@ -592,6 +592,43 @@ export class MemoryStore {
     return marked;
   }
 
+  /**
+   * Every file the store still holds artifact memories for.
+   *
+   * Ingest only ever visits files that exist, so a file deleted from disk was
+   * never revisited and never reclaimed: it stayed in the index, answered
+   * queries, and cited a source_ref pointing at nothing. Reclaiming it needs the
+   * one thing the walk cannot supply -- the list of files the store thinks it
+   * has.
+   */
+  async artifactFiles(): Promise<string[]> {
+    const rows = await this.run(
+      `MATCH (m:Memory)
+       WHERE m.layer = 'artifact' AND m.file_path <> ''
+       RETURN DISTINCT m.file_path AS filePath`,
+      {},
+    );
+    return rows.map((row) => String((row as { filePath?: string }).filePath ?? '')).filter(Boolean);
+  }
+
+  /**
+   * Drops declarations that the file no longer makes, with their ABOUT edges.
+   *
+   * Symbols had an upsert and no delete, so a renamed function left both names
+   * in the graph and the old one kept its original line range forever. The edge
+   * goes first: a relationship whose endpoint is gone is not something to leave
+   * behind for a later query to trip over.
+   */
+  async deleteSymbols(ids: string[]): Promise<number> {
+    let removed = 0;
+    for (const id of ids) {
+      await this.run('MATCH (:Memory)-[r:ABOUT]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
+      await this.run('MATCH (s:Symbol) WHERE s.id = $id DELETE s', { id });
+      removed += 1;
+    }
+    return removed;
+  }
+
   async hasEdges(id: string): Promise<boolean> {
     const rows = await this.run(
       'MATCH (m:Memory)-[]-() WHERE m.id = $id RETURN m.id AS id LIMIT 1',

@@ -157,6 +157,28 @@ export async function doctor(
             'a decision with no link to what it constrains is hard to find later'
           : 'every recorded memory is connected',
     });
+
+    // Whether the cited file is still there.
+    //
+    // `orphans` asks whether a memory is connected to the graph, which a memory
+    // about a deleted file still is. So the store could hold chunks of files
+    // that no longer exist, keep returning them, cite line ranges in nothing --
+    // and report every check green. A store that is behind is usable; a store
+    // that is behind and says it is fine is worse than none, because it is
+    // believed.
+    const root = store.getMeta().projectRoot;
+    const tracked = await store.artifactFiles();
+    const vanished = tracked.filter((file) => !fs.existsSync(path.join(root, file)));
+    checks.push({
+      name: 'file anchors',
+      status: vanished.length > 0 ? 'warn' : 'ok',
+      detail:
+        vanished.length > 0
+          ? `${vanished.length} file(s) in the index no longer exist on disk ` +
+            `(${vanished.slice(0, 3).join(', ')}${vanished.length > 3 ? ', ...' : ''}) -- ` +
+            'their memories still answer queries; run `memory ingest` to reclaim them'
+          : `${tracked.length} indexed file(s) all present on disk`,
+    });
   }
 
   const pending = pendingCount(store.dir);

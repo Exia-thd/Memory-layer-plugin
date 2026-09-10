@@ -81,13 +81,96 @@ function unique(items: string[]): string[] {
  */
 const SCAN_CANDIDATES = [
   'docs', 'doc', 'documentation', 'adr', 'adrs', 'rfc', 'rfcs',
-  'src', 'lib', 'app', 'packages', 'internal', 'pkg', 'cmd',
+  // Both spellings, everywhere. `app` was here without `apps`, so the more
+  // common of the two was the one the scan could not see.
+  'src', 'lib', 'libs', 'app', 'apps', 'packages', 'package',
+  'internal', 'pkg', 'cmd', 'service', 'services',
   'README.md', 'README.rst', 'ARCHITECTURE.md', 'CONTRIBUTING.md',
   'CHANGELOG.md', 'DECISIONS.md',
 ];
 
+/** What a directory holds when it is a project rather than a pile of files. */
+const PROJECT_MARKERS = [
+  '.git', 'package.json', 'go.mod', 'pyproject.toml', 'requirements.txt',
+  'pom.xml', 'build.gradle', 'Cargo.toml', 'composer.json', 'Gemfile',
+  '*.csproj', 'src', 'lib', 'app',
+];
+
+/** Directories that are never a project of the user's, whatever they contain. */
+const NEVER_A_PROJECT = new Set([
+  'node_modules', 'dist', 'build', 'target', 'coverage', 'vendor',
+  '.venv', 'venv', '__pycache__', '.next', '.cache', '.memory', '.git',
+]);
+
+function looksLikeProject(dir: string): string | null {
+  for (const marker of PROJECT_MARKERS) {
+    if (marker === '*.csproj') {
+      const found = nodeFs
+        .readdirSync(dir, { withFileTypes: true })
+        .find((entry) => entry.isFile() && entry.name.endsWith('.csproj'));
+      if (found) return found.name;
+      continue;
+    }
+    if (nodeFs.existsSync(nodePath.join(dir, marker))) return marker;
+  }
+  return null;
+}
+
+export interface ScanTarget {
+  path: string;
+  /** Why it was chosen, so a guess can be checked at a glance rather than trusted. */
+  reason: string;
+}
+
+/**
+ * What to scan when the user names nothing.
+ *
+ * A conventional-name list alone is blind to the layout people actually keep:
+ * a working directory holding several checkouts plus one shared docs tree. The
+ * names are the user's own -- `repoA`, `bestmed-core` -- and no list will ever
+ * contain them. So a directory that is not recognised by name gets looked into
+ * once, and is taken if it carries a marker of being a project.
+ *
+ * One level, and a stated reason for every choice. Scanning everything would
+ * also find those repositories, and would find `backup-2024` and `vendor` and a
+ * downloads folder with them -- a store full of noise on the first run, which
+ * is harder to notice than a store missing something.
+ */
 export function scanTargets(root: string): string[] {
-  return SCAN_CANDIDATES.filter((candidate) => nodeFs.existsSync(nodePath.join(root, candidate)));
+  return describeScanTargets(root).map((target) => target.path);
+}
+
+export function describeScanTargets(root: string): ScanTarget[] {
+  const chosen = new Map<string, ScanTarget>();
+
+  for (const candidate of SCAN_CANDIDATES) {
+    if (nodeFs.existsSync(nodePath.join(root, candidate))) {
+      chosen.set(candidate, { path: candidate, reason: 'conventional name' });
+    }
+  }
+
+  let entries: nodeFs.Dirent[] = [];
+  try {
+    entries = nodeFs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [...chosen.values()];
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (chosen.has(entry.name)) continue;
+    if (entry.name.startsWith('.') || NEVER_A_PROJECT.has(entry.name)) continue;
+
+    let marker: string | null = null;
+    try {
+      marker = looksLikeProject(nodePath.join(root, entry.name));
+    } catch {
+      continue;
+    }
+    if (marker) chosen.set(entry.name, { path: entry.name, reason: marker });
+  }
+
+  return [...chosen.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
 /** Resolves the project from a directory, refusing to guess when it is not a repo. */

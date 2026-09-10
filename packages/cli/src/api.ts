@@ -121,7 +121,9 @@ export async function init(
 
 export async function runIngest(
   targets: string[],
-  options: { from?: string; layer?: Layer; force?: boolean; embed?: boolean } = {},
+  options: {
+    from?: string; layer?: Layer; force?: boolean; embed?: boolean; maxFileBytes?: number;
+  } = {},
 ): Promise<IngestReport> {
   const store = await writable(options.from);
   try {
@@ -129,6 +131,7 @@ export async function runIngest(
     const report = await ingest(store, targets, {
       layer: options.layer ?? 'artifact',
       force: options.force ?? false,
+      maxFileBytes: options.maxFileBytes,
       embedder: provider,
     });
     const meta = store.getMeta();

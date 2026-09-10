@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import {
   formatReport, forgetProject, LAYERS, EDGE_TYPES,
-  type Layer, type EdgeType,
+  type Layer, type EdgeType, type IgnoredFile,
 } from '@memory-layer/core';
 import * as api from './api.js';
 import nodeFs from 'node:fs';
 import nodePath from 'node:path';
-import { resolveProject, storeDirOrThrow, scanTargets } from './project.js';
+import { resolveProject, storeDirOrThrow, describeScanTargets } from './project.js';
 // Imported where it is used, not at the top.
 //
 // `mcp.js` drags in the MCP SDK, which cost 290ms on every command that is not
@@ -19,10 +19,93 @@ import { resolveProject, storeDirOrThrow, scanTargets } from './project.js';
  * crashes, because the caller carries on believing the work happened.
  */
 
+/**
+ * Chooses what to scan and says why, before a single file is read.
+ *
+ * A guess that cannot be checked is the thing to avoid here: the scan decides
+ * what the store will know, and a wrong guess is invisible afterwards -- the
+ * store simply has less in it, and nothing says so. Printing the reason turns
+ * the guess into something the reader can disagree with in the second it takes
+ * to read.
+ */
+function announceScan(root: string, quiet: boolean): string[] {
+  const targets = describeScanTargets(root);
+  if (targets.length === 0) return [];
+
+  if (!quiet) {
+    process.stdout.write(`scanning ${targets.map((t) => t.path).join(', ')}\n`);
+    for (const target of targets) {
+      if (target.reason === 'conventional name') continue;
+      process.stdout.write(`   ${target.path}  (${target.reason})\n`);
+    }
+  }
+  return targets.map((target) => target.path);
+}
+
+/**
+ * The paths this run will read, announced either way.
+ *
+ * Named paths are announced too. They are the user's own words, but the line is
+ * what makes a typo visible in the second before the scan rather than in an
+ * empty result an hour later -- and a command whose output changes shape
+ * depending on how it was invoked is harder to read than one that does not.
+ * Quiet under --json, where anything on stdout is no longer JSON.
+ */
+function chooseScan(args: Args, root: string): string[] {
+  const quiet = Boolean(args.flags.json);
+  if (args.positional.length > 0) {
+    if (!quiet) process.stdout.write(`scanning ${args.positional.join(', ')}\n`);
+    return args.positional;
+  }
+  return announceScan(root, quiet);
+}
+
+/**
+ * What the walk passed over, grouped by reason.
+ *
+ * Ingest reported only what it took. Nine files out of twenty-one could be left
+ * behind -- diagrams kept as source, a directory named `build` -- under a line
+ * that read like success. Skipping is a fine decision; skipping quietly is how
+ * a store ends up trusted and incomplete at the same time.
+ */
+function formatIgnored(ignored: IgnoredFile[], verbose: boolean): string {
+  if (ignored.length === 0) return '';
+
+  const byReason = new Map<string, IgnoredFile[]>();
+  for (const entry of ignored) {
+    const list = byReason.get(entry.reason) ?? [];
+    list.push(entry);
+    byReason.set(entry.reason, list);
+  }
+
+  const lines = [`\nskipped ${ignored.length}:`];
+  for (const [reason, entries] of byReason) {
+    const details = [...new Set(entries.map((entry) => entry.detail))].sort();
+    const shown = details.slice(0, 8).join(' ');
+    const more = details.length > 8 ? ` +${details.length - 8} more` : '';
+    lines.push(`   ${entries.length} ${reason} (${shown}${more})`);
+    // A skip the reader cannot undo is only half a message. Every reason that
+    // has a way out says what it is; the one that does not says why not.
+    const wayOut: Record<string, string> = {
+      'not indexed unless named': 'name the file to index it anyway',
+      'too large': 'name the file to index it anyway, or --max-file-size <MB>',
+      'excluded directory': 'name the directory to index it anyway',
+      'secret or machine bookkeeping': 'deliberate: credentials must never reach an embedding',
+      'not text': 'nothing to index; read it with an agent and record the conclusion',
+    };
+    const hint = wayOut[reason];
+    if (hint) lines.push(`      ${hint}`);
+    if (verbose) for (const entry of entries) lines.push(`      ${entry.path}`);
+  }
+  if (!verbose) lines.push('   --verbose to list them');
+  return lines.join('\n');
+}
+
 const USAGE = `memory - project memory layer
 
   memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
-  memory ingest <paths...> [--layer L] [--force] [--no-embed] [--no-ui]
+  memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
+                          [--verbose] [--max-file-size MB]   no paths: scan the project
   memory embed [--force]              embed nodes missing a current vector
   memory search <query> [--limit N] [--layer L] [--json]
   memory why <file|symbol> [--json]   decisions and constraints touching it
@@ -110,6 +193,24 @@ async function refreshUi(): Promise<string | null> {
   }
 }
 
+/**
+ * The size limit for this run, if the user set one.
+ *
+ * A default that cannot be overruled is not a default, it is a rule -- and this
+ * one has to bend, because the person who put a large export in the tree is the
+ * only one who knows whether it is worth indexing.
+ */
+function maxFileBytes(args: Args): number | undefined {
+  const flag = stringFlag(args, 'max-file-size') ?? process.env.MEMORY_LAYER_MAX_FILE_MB;
+  if (flag === undefined) return undefined;
+
+  const mb = Number(flag);
+  if (!Number.isFinite(mb) || mb <= 0) {
+    throw new Error(`--max-file-size expects megabytes, got ${JSON.stringify(flag)}`);
+  }
+  return Math.round(mb * 1_000_000);
+}
+
 function stringFlag(args: Args, name: string): string | undefined {
   const value = args.flags[name];
   return typeof value === 'string' ? value : undefined;
@@ -155,14 +256,8 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'init': {
-      const targets = args.flags['no-scan']
-        ? []
-        : args.positional.length > 0
-          ? args.positional
-          : scanTargets(resolveProject().root);
+      const targets = args.flags['no-scan'] ? [] : chooseScan(args, resolveProject().root);
 
-      // Said before it runs: a guess about which paths matter should be visible.
-      if (targets.length > 0) process.stdout.write(`scanning ${targets.join(', ')}\n`);
 
       const { storeDir, report, scanned, page } = await api.init({
         dimensions: stringFlag(args, 'dims'),
@@ -195,23 +290,43 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
     }
 
     case 'ingest': {
-      if (args.positional.length === 0) throw new Error('ingest needs at least one path');
-      const report = await api.runIngest(args.positional, {
+      // No paths is the common case, not an error: the daily command should be
+      // `memory ingest`, deciding the same way init did rather than making the
+      // user retype a list they already approved once.
+      const paths = chooseScan(args, resolveProject().root);
+      if (paths.length === 0) {
+        throw new Error(
+          'Nothing conventional to scan here, and nothing named. ' +
+            'Point it somewhere: memory ingest <paths>',
+        );
+      }
+      const report = await api.runIngest(paths, {
         layer: layerFlag(args),
         force: Boolean(args.flags.force),
         embed: !args.flags['no-embed'],
+        maxFileBytes: maxFileBytes(args),
       });
       emit(args, report, () =>
         `ingested ${report.files} files (${report.skipped} unchanged) -> ` +
         `${report.created} new, ${report.refreshed} refreshed, ${report.embedded} embedded` +
+        (report.vanished > 0 ? `
+reclaimed ${report.vanished} file(s) no longer on disk` : '') +
+        (report.symbolsRemoved > 0
+          ? `\ndropped ${report.symbolsRemoved} declaration(s) the code no longer makes`
+          : '') +
+        (report.dense.length > 0
+          ? '\n' + report.dense
+              .map((d) => `   ${d.path}: ${d.chunks} chunks from ${d.kb} KB -- unusually dense`)
+              .join('\n')
+          : '') +
+        formatIgnored(report.ignored, Boolean(args.flags.verbose)) +
         (report.redactions.length > 0
           ? `\nredacted: ${report.redactions.map((r) => `${r.rule} x${r.count}`).join(', ')}`
           : ''),
       );
       if (report.created + report.refreshed + report.removed > 0 && !args.flags['no-ui']) {
         const page = await refreshUi();
-        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}
-`);
+        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}\n`);
       }
       return 0;
     }
@@ -442,8 +557,7 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
       });
       if (report.removed > 0 && !args.flags['no-ui']) {
         const page = await refreshUi();
-        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}
-`);
+        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}\n`);
       }
       return 0;
     }

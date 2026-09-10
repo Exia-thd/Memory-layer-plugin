@@ -12,7 +12,14 @@ export {
   type Chunk, type Declaration,
 } from './ingest/chunker.js';
 export { redact, looksRedacted } from './ingest/redact.js';
-export { ingest, type IngestOptions, type IngestReport } from './ingest/ingest.js';
+export {
+  ingest,
+  type IngestOptions,
+  type IngestReport,
+  type IgnoredFile,
+  type IgnoreReason,
+  DEFAULT_MAX_FILE_BYTES,
+} from './ingest/ingest.js';
 export { ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, type AstCapability } from './ingest/languages.js';
 
 export * from './embed/index.js';
