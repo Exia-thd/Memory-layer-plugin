@@ -449,6 +449,43 @@ fusion: bm25=3 semantic=3 recency=3 graph=0
 Two different things, and one name for both would hide a failure in either
 behind a healthy line about the other.
 
+### Getting the graph wired
+
+The graph branch retrieves along edges, and until now nothing created them.
+`ABOUT` was written by ingest and by nothing else, so a decision written by hand
+-- the most valuable kind of memory there is -- had no route to the function it
+was about: the graph held the symbol, the store held the decision, and the two
+sat in the same file unconnected. Memory-to-memory links were worse, because
+they needed somebody to type `memory link` at the right moment, and a feature
+that works only when the user recalls it exists mostly does not work.
+
+**What is derivable is derived.** A `source_ref` with a line span already says
+which declarations it covers:
+
+```bash
+memory write --layer semantic   --title "Retry twice, not backoff"   --body "The gateway counts each attempt as a new authorisation."   --source-ref "src/charge.js#L1-L3"
+
+# anchored to chargeInvoice
+```
+
+`memory why chargeInvoice` now returns that decision, though the decision never
+mentions the function by name. A span that covers nothing anchors nothing, and
+says nothing about it -- both are ordinary.
+
+**What is a judgement stays one**, and arrives as a command rather than advice:
+
+```
+related memories -- link them if they bear on each other:
+  memory link mem_7f2 mem_3a9 DERIVED_FROM   # Retry twice on the payment gateway
+```
+
+Suggested, never created. The graph branch retrieves *through* edges, so a
+guessed edge does not sit there harmlessly: it pulls an unrelated decision into
+results for the rest of the store's life, and nothing downstream can tell a
+guess from a judgement. `memory conflicts` prints its `CONTRADICTS` command the
+same way -- it had been detecting contradictions and leaving the recording as an
+exercise, so the same pair was rediscovered from scratch every time.
+
 ### Picking before reading
 
 A full hit carries a 220-character snippet and costs about sixty tokens. `memory

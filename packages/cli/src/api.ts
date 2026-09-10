@@ -443,7 +443,15 @@ export async function runSessionEnd(
 export async function runWrite(
   input: WriteInput,
   options: { from?: string } = {},
-): Promise<{ id: string; queued: boolean; redactions: { rule: string; count: number }[] }> {
+): Promise<{
+  id: string;
+  queued: boolean;
+  redactions: { rule: string; count: number }[];
+  /** Declarations the source_ref lands inside, linked automatically. */
+  about: string[];
+  /** Memories close enough to be worth linking, for a person to decide. */
+  related: Array<{ id: string; title: string }>;
+}> {
   if (!input.sourceRef) {
     throw new Error('source_ref is required: a memory that cannot be traced back cannot be checked.');
   }
@@ -484,9 +492,30 @@ export async function runWrite(
       }
     }
 
+    // What this source_ref points at, before the write opens a transaction.
+    //
+    // A hand-written decision could never reach the code graph: ABOUT was
+    // produced by ingest and nothing else, so the symbol and the decision about
+    // it sat in the same store unconnected. The span in the source_ref answers
+    // it exactly -- no guessing, no asking.
+    const covered = await symbolsForRef(store, input.sourceRef);
+
+    // Memories near enough to be worth a link, which is a judgement and stays
+    // one. Suggested, never created: a wrong edge is worse than a missing one
+    // because the graph branch will retrieve through it, and nothing downstream
+    // can tell a guessed edge from a considered one.
+    const related = vector && provider
+      ? await nearbyMemories(store, node, vector, provider.identity)
+      : [];
+
     await store.transact(async () => {
       await store!.upsertNode(node);
       if (vector && provider) await store!.setEmbedding(node.id, vector, provider.identity);
+
+      for (const symbol of covered) {
+        await store!.upsertSymbol(symbol);
+        await store!.linkAbout(node.id, symbol.id);
+      }
 
       for (const link of sessionLinks(storeDir, node, input.links)) {
         await store!.addEdge({
@@ -500,7 +529,7 @@ export async function runWrite(
       }
     });
 
-    return { id: node.id, queued: false, redactions };
+    return { id: node.id, queued: false, redactions, about: covered.map((s) => s.name), related };
   } catch (err) {
     if (!(err instanceof StoreLockedError)) throw err;
     journal.appendNode(storeDir, node);
@@ -510,9 +539,79 @@ export async function runWrite(
         weight: link.weight ?? 1, createdAt: now, evidenceRef: null,
       });
     }
-    return { id: node.id, queued: true, redactions };
+    // A queued write cannot read the graph, so there is nothing to link or
+    // suggest yet. `memory merge` folds the node in; the anchors follow it.
+    return { id: node.id, queued: true, redactions, about: [], related: [] };
   } finally {
     await store?.close();
+  }
+}
+
+/**
+ * The declarations a source_ref lands inside.
+ *
+ * Returns nothing for a ref with no line span, and nothing for a file that has
+ * no recorded declarations -- both are ordinary, and neither is worth a warning.
+ */
+async function symbolsForRef(
+  store: MemoryStore,
+  sourceRef: string,
+): Promise<Array<{ id: string; name: string; filePath: string; kind: string; startLine: number; endLine: number }>> {
+  const match = /^(.+?)#L(\d+)(?:-L(\d+))?$/.exec(sourceRef);
+  if (!match) return [];
+
+  const [, file, from, to] = match;
+  const start = Number(from);
+  const end = Number(to ?? from);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return [];
+
+  try {
+    return await store.symbolsCovering(file!.replace(/\\/g, '/'), start, end);
+  } catch (err) {
+    // The anchor is a bonus on top of a write that has already succeeded in
+    // every other respect. Losing it must not lose the memory.
+    log('warn', `could not resolve symbols for ${sourceRef}`, err);
+    return [];
+  }
+}
+
+/**
+ * Memories close enough that a link is worth considering.
+ *
+ * Suggestion rather than creation, on purpose. The graph branch retrieves
+ * through edges, so a wrong edge does not sit there harmlessly -- it pulls an
+ * unrelated decision into results for the rest of the store's life, and nothing
+ * downstream can tell a guessed edge from one somebody meant. Deciding that two
+ * decisions bear on each other is the judgement this layer exists to record,
+ * and handing it to a cosine score would be recording something else.
+ */
+async function nearbyMemories(
+  store: MemoryStore,
+  node: MemoryNode,
+  vector: number[],
+  identity: { model: string; provider: string },
+): Promise<Array<{ id: string; title: string }>> {
+  try {
+    const near = await store.semanticTopK(vector, {
+      limit: 6,
+      model: identity.model,
+      provider: identity.provider,
+      // Chunks of files are not what one links a decision to; ABOUT already
+      // covers that, and precisely, from the line span.
+      layers: ['semantic', 'episodic', 'procedural'],
+    });
+
+    // High enough that the two are plausibly about the same thing. A looser
+    // threshold turns this from a short prompt into a list nobody reads, which
+    // is the same as no prompt at all.
+    const candidates = near.filter((hit) => hit.id !== node.id && hit.similarity >= 0.55);
+    if (candidates.length === 0) return [];
+
+    const nodes = await store.getNodes(candidates.slice(0, 3).map((hit) => hit.id));
+    return [...nodes.values()].map((found) => ({ id: found.id, title: found.title }));
+  } catch (err) {
+    log('warn', 'could not look for related memories', err);
+    return [];
   }
 }
 

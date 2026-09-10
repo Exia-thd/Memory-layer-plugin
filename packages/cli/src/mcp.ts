@@ -78,7 +78,9 @@ const TOOLS = [
     name: 'memory_write',
     description:
       'Record a decision, error, constraint or procedure. Always include the reason it was ' +
-      'chosen over the alternative -- a decision without its reason cannot be re-evaluated later.',
+      'chosen over the alternative -- a decision without its reason cannot be re-evaluated later. ' +
+      'A source_ref with a line span is anchored to the declarations it covers automatically, and ' +
+      'the reply names any existing memories close enough to be worth linking.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -327,6 +329,16 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
         note: result.queued
           ? 'Another process held the write lock, so this was queued to the session journal. ' +
             'It is recorded but will not appear in search until `memory merge` runs.'
+          : undefined,
+        // Said in words, because an agent reads the reply and a bare array of
+        // ids reads as noise. The graph branch only retrieves through edges
+        // somebody recorded, so the moment just after a write -- when the
+        // reasoning is still in hand -- is the one moment linking is cheap.
+        suggestion: result.related.length > 0
+          ? `${result.related.length} existing memor${result.related.length === 1 ? 'y is' : 'ies are'} ` +
+            'close to this one. If any of them bears on this decision, call memory_link -- ' +
+            'search retrieves one hop along those links, so an unlinked decision is found ' +
+            'only by its own wording.'
           : undefined,
       };
     }

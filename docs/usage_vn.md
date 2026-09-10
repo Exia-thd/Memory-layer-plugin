@@ -470,6 +470,43 @@ fusion: bm25=3 semantic=3 recency=3 graph=0
 **nhánh truy xuất** này. Hai thứ khác nhau, và gọi chung một tên sẽ giấu lỗi của
 cái này sau dòng xanh của cái kia.
 
+### Nối dây cho đồ thị
+
+Nhánh graph truy xuất **theo cạnh**, mà cho tới giờ **không có gì tạo ra cạnh**.
+`ABOUT` chỉ do ingest ghi, nên một quyết định viết tay — loại ký ức giá trị nhất —
+**không có đường nào** đi tới hàm mà nó nói về: đồ thị giữ symbol, kho giữ quyết
+định, hai thứ nằm cùng một file mà không nối. Cạnh giữa các ký ức còn tệ hơn, vì
+nó cần ai đó **nhớ gõ** `memory link` đúng lúc — mà một tính năng chỉ chạy khi
+người dùng nhớ ra là nó tồn tại thì phần lớn thời gian là không chạy.
+
+**Thứ suy ra được thì suy ra.** Một `source_ref` có khoảng dòng đã tự nói nó phủ
+lên khai báo nào:
+
+```bash
+memory write --layer semantic   --title "Chốt ở hai lần, không backoff"   --body "Cổng thanh toán đếm mỗi lần thử là một lượt authorise mới."   --source-ref "src/charge.js#L1-L3"
+
+# anchored to chargeInvoice
+```
+
+`memory why chargeInvoice` giờ trả về quyết định đó, dù quyết định **không hề
+nhắc tên hàm**. Khoảng dòng không phủ khai báo nào thì không neo gì, và cũng
+không kêu ca — cả hai đều là chuyện bình thường.
+
+**Thứ là phán đoán thì vẫn là phán đoán**, và được đưa ra dưới dạng **lệnh chạy
+được**, không phải lời khuyên:
+
+```
+related memories -- link them if they bear on each other:
+  memory link mem_7f2 mem_3a9 DERIVED_FROM   # Chốt ở hai lần trên cổng thanh toán
+```
+
+**Gợi ý, không bao giờ tự tạo.** Nhánh graph truy xuất **xuyên qua** cạnh, nên
+một cạnh đoán sai không nằm im vô hại: nó kéo một quyết định chẳng liên quan vào
+kết quả suốt đời kho, và không thứ gì phía sau phân biệt được cạnh đoán với cạnh
+có cân nhắc. `memory conflicts` cũng in lệnh `CONTRADICTS` theo cách đó — trước
+đây nó phát hiện mâu thuẫn rồi để việc ghi lại cho người dùng tự lo, nên cùng một
+cặp bị phát hiện lại từ đầu mỗi lần có người hỏi.
+
 ### Chọn trước, đọc sau
 
 Một kết quả đầy đủ mang theo 220 ký tự trích đoạn, tốn chừng sáu mươi token.

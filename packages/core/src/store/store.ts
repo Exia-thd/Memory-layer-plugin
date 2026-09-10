@@ -522,6 +522,34 @@ export class MemoryStore {
    * Without this, `why <symbol>` had nothing to anchor on and degraded to a text
    * search over prose that may never mention the symbol by name.
    */
+  /**
+   * Declarations a source_ref's line range falls inside.
+   *
+   * The join that makes the code graph usable rather than decorative. `ABOUT`
+   * existed and was only ever written by ingest, so a decision written by hand
+   * -- the most valuable kind of memory there is -- had no route to the
+   * function it was about. The graph held the symbol, the store held the
+   * decision, and nothing connected them.
+   *
+   * A source_ref already carries the answer: `docs/adr.md#L12-L20` names a file
+   * and a span, and a span either overlaps a declaration or it does not. That
+   * is derivable, exact, and needs nobody to remember anything -- which is the
+   * difference between a feature that works and one that works when someone
+   * recalls that it exists.
+   */
+  async symbolsCovering(filePath: string, startLine: number, endLine: number): Promise<SymbolRow[]> {
+    const rows = await this.run(
+      `MATCH (s:Symbol)
+       WHERE s.file_path = $filePath
+         AND s.start_line <= $endLine AND s.end_line >= $startLine
+       RETURN s.id AS id, s.name AS name, s.file_path AS filePath, s.kind AS kind,
+              s.start_line AS startLine, s.end_line AS endLine
+       ORDER BY s.start_line`,
+      { filePath, startLine, endLine },
+    );
+    return rows as unknown as SymbolRow[];
+  }
+
   async nodesAboutSymbol(name: string): Promise<MemoryNode[]> {
     const rows = await this.run(
       `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)

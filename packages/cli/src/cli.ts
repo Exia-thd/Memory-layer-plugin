@@ -496,7 +496,16 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       emit(args, found, () =>
         found.length === 0
           ? 'no conflicts'
-          : found.map((c) => `${c.kind}: ${c.a.title}\n          vs ${c.b.title}`).join('\n'),
+          : found
+              .map(
+                (c) =>
+                  `${c.kind}: ${c.a.title}\n          vs ${c.b.title}\n` +
+                  // The detection already happened; recording it is one command
+                  // away and used to be several. An unrecorded contradiction is
+                  // found again from scratch every time somebody asks.
+                  `          memory link ${c.a.id} ${c.b.id} CONTRADICTS`,
+              )
+              .join('\n\n'),
       );
       return 0;
     }
@@ -541,6 +550,16 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       const result = await api.runWrite({ layer, title, body, sourceRef, links });
       emit(args, result, () =>
         `${result.id}${result.queued ? ' (queued: the store was locked, run `memory merge`)' : ''}` +
+        (result.about.length > 0 ? `\nanchored to ${result.about.join(', ')}` : '') +
+        // Printed as commands rather than as advice. A suggestion that takes
+        // three steps to act on is one nobody acts on, and an unlinked graph is
+        // a retrieval branch that never fires.
+        (result.related.length > 0
+          ? '\n\nrelated memories -- link them if they bear on each other:\n' +
+            result.related
+              .map((r) => `  memory link ${result.id} ${r.id} DERIVED_FROM   # ${r.title}`)
+              .join('\n')
+          : '') +
         (result.redactions.length > 0
           ? `\nredacted: ${result.redactions.map((r) => `${r.rule} x${r.count}`).join(', ')}`
           : ''),
