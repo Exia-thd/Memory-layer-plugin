@@ -289,3 +289,58 @@ test('prune refuses a window that would match everything', async () => {
     repo.cleanup();
   }
 });
+
+test('a plain search uses the symbol anchors, not only why', async () => {
+  const repo = makeRepo({
+    'src/charge.js': 'export function chargeInvoice(inv) {\n  return psp.capture(inv);\n}\n',
+    'docs/adr.md': '# ADR\n\nplaceholder.\n',
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src', 'docs']);
+
+    // The decision never contains the symbol's name. Three text branches over
+    // prose cannot reach it; the ABOUT edge can, and the store held that edge
+    // while only `why` consulted it.
+    cli(repo, [
+      'write', '--layer', 'semantic', '--title', 'Ledger holds sierrafunds twice',
+      '--body', 'Backoff would hold sierrafunds twice on the customer account.',
+      '--source-ref', 'src/charge.js#L1-L3',
+    ]);
+
+    const found = JSON.parse(cli(repo, ['search', 'chargeInvoice', '--limit', '5', '--json']));
+    assert.ok(
+      found.results.some((r) => r.title.includes('sierrafunds')),
+      `the anchor was not used by search: ${JSON.stringify(found.results.map((r) => r.title))}`,
+    );
+    assert.ok(found.fusion.branches.entity >= 1, JSON.stringify(found.fusion));
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('the entity branch says why it found nothing, and how to fix it', async () => {
+  const repo = makeRepo({ 'docs/adr.md': '# ADR\n\nplaceholder about romeoterm.\n' });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'docs']);
+
+    const found = JSON.parse(cli(repo, ['search', 'romeoterm', '--limit', '5', '--json']));
+    assert.equal(found.fusion.branches.entity, 0);
+    // A store with no anchors is ordinary, not broken -- but a reader deserves
+    // to know the branch had nothing to work with rather than assume it ran.
+    assert.match(found.fusion.reasons.entity, /source_ref|anchor/i, found.fusion.reasons.entity);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('doctor declares the entity branch', async () => {
+  const repo = makeRepo({ 'docs/adr.md': '# ADR\n\nplaceholder.\n' });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    assert.match(cli(repo, ['doctor']), /entity\s+ok\s+symbol-anchors/, cli(repo, ['doctor']));
+  } finally {
+    repo.cleanup();
+  }
+});

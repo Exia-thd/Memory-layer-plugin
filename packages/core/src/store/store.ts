@@ -550,6 +550,29 @@ export class MemoryStore {
     return rows as unknown as SymbolRow[];
   }
 
+  /**
+   * Memories about any declaration whose name appears in a set of terms.
+   *
+   * The entity signal, batched. Asking per name costs a round trip each and a
+   * query is a handful of terms, so one `list_contains` beats five queries --
+   * and this runs on every search rather than only on `why`.
+   *
+   * Matching is case-insensitive on the folded term, because a query is typed
+   * by a person and `chargeinvoice` is the same question as `chargeInvoice`.
+   */
+  async nodesAboutSymbolNames(names: string[], limit: number): Promise<MemoryNode[]> {
+    if (names.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)
+       WHERE list_contains($names, lower(s.name)) AND m.superseded_at = 0
+       RETURN ${NODE_COLUMNS}
+       ORDER BY m.importance DESC, m.created_at DESC
+       LIMIT ${Math.max(1, Math.floor(limit))}`,
+      { names: names.map((name) => name.toLowerCase()) },
+    );
+    return rows.map(rowToNode);
+  }
+
   async nodesAboutSymbol(name: string): Promise<MemoryNode[]> {
     const rows = await this.run(
       `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)

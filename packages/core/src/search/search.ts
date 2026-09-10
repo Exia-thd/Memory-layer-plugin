@@ -23,6 +23,8 @@ export interface SearchOptions {
   disableSemantic?: boolean;
   /** Set to skip the graph branch; used by the test that guards the fusion report. */
   disableGraph?: boolean;
+  /** Set to skip the entity branch, for the same reason. */
+  disableEntity?: boolean;
   now?: number;
 }
 
@@ -111,6 +113,7 @@ export async function search(
   });
   branches.push(await semanticBranch(store, query, embedder, limit, options));
   branches.push(recencyBranch(overlapRanked, postings, summaries, terms, limit, now, eligible));
+  branches.push(await entityBranch(store, terms, limit, options));
   branches.push(await graphBranch(store, branches, limit, wanted, options));
 
   const { hits, report } = fuse(branches);
@@ -333,6 +336,63 @@ function recencyBranch(
     .map((hit) => hit.id);
 
   return { name: 'recency', ranked };
+}
+
+/**
+ * Memories about a declaration the query names.
+ *
+ * The signal Mem0 calls entity linking, and the one this store had the data for
+ * and was not using: `ABOUT` edges tie a memory to a named declaration, and
+ * only `why` consulted them. `memory search "chargeInvoice"` ran three text
+ * branches over prose that may never contain the word, while the graph sat
+ * there holding the exact answer.
+ *
+ * A symbol name is a strong signal precisely because it is arbitrary. Ordinary
+ * words match many memories weakly; `chargeInvoice` matches one thing, and a
+ * memory anchored to it is about that thing rather than merely mentioning it.
+ * That is why this is a branch of its own rather than a boost inside another --
+ * fusion can then show what it contributed, and a store with no anchors reports
+ * a reason instead of quietly ranking the same as before.
+ */
+async function entityBranch(
+  store: MemoryStore,
+  terms: string[],
+  limit: number,
+  options: SearchOptions,
+): Promise<Branch> {
+  if (options.disableEntity) {
+    return {
+      name: 'entity',
+      ranked: [],
+      unavailableReason: 'Skipped: disableEntity was set for this query.',
+    };
+  }
+  if (terms.length === 0) {
+    return {
+      name: 'entity',
+      ranked: [],
+      degradedReason: 'The query contains no indexable terms.',
+    };
+  }
+
+  try {
+    const found = await store.nodesAboutSymbolNames(terms, limit * 2);
+    return found.length > 0
+      ? { name: 'entity', ranked: found.map((node) => node.id) }
+      : {
+          name: 'entity',
+          ranked: [],
+          degradedReason:
+            'No declaration named in this query carries recorded memory. ' +
+            'Anchors come from a source_ref with a line span, or `memory link ... ABOUT`.',
+        };
+  } catch (err) {
+    return {
+      name: 'entity',
+      ranked: [],
+      unavailableReason: `Symbol lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 /**

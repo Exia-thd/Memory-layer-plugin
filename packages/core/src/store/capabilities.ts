@@ -47,6 +47,17 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
     // has linked anything, which is a normal state and not a fault -- so it
     // reports the difference rather than returning an empty list that reads the
     // same as a branch that ran and found nothing.
+    // The signal Mem0 calls entity linking. The store held the data -- ABOUT
+    // edges from a memory to a named declaration -- and only `why` consulted
+    // it, so an ordinary search ran three text branches over prose that may
+    // never contain the symbol's name while the graph held the exact answer.
+    entity: {
+      provider: 'symbol-anchors',
+      status: 'available',
+      reason:
+        'Returns memories anchored to a declaration the query names. Anchors are derived from ' +
+        'a source_ref with a line span, so they appear as soon as decisions cite code.',
+    },
     // `graph` above is the database engine; this is the retrieval branch that
     // walks it. Two different things, and one name for both would hide a failure
     // in either behind a healthy line about the other.
