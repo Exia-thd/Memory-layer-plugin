@@ -151,11 +151,17 @@ export async function runGet(id: string, options: { from?: string } = {}): Promi
  */
 export async function runWhy(
   target: string,
-  options: { from?: string; limit?: number } = {},
+  options: { from?: string; limit?: number; anchorOnly?: boolean } = {},
 ): Promise<SearchResult & { anchoredTo: string }> {
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
-    const provider = await embedder(store.dimensions);
+    // Loading the embedding model costs about 2.5 seconds, and the hook that
+    // fires on every Read, Grep and Glob only ever needed the anchor branch --
+    // one Cypher query. It was paying for a model it did not use, on every file
+    // the agent touched. `anchorOnly` skips constructing the provider at all;
+    // the skipped branch is still declared, because a branch that quietly does
+    // not run is the failure C4 exists to stop.
+    const provider = options.anchorOnly ? null : await embedder(store.dimensions);
     const limit = options.limit ?? 10;
 
     // Anchor on provenance first, filtered in the database rather than by reading
@@ -197,6 +203,13 @@ export async function runWhy(
     // Anchoring is a retrieval branch and is reported as one; otherwise a result
     // set answered entirely by anchors reads as "every branch found nothing".
     found.fusion.branches.anchor = anchored.length;
+    if (options.anchorOnly) {
+      // Said out loud: this run never asked the semantic branch, which is not
+      // the same as asking and getting nothing back.
+      if (!found.fusion.degraded.includes('semantic')) found.fusion.degraded.push('semantic');
+      found.fusion.reasons.semantic =
+        'Skipped: --anchor-only avoids loading the embedding model, which costs about 2.5s.';
+    }
     if (anchored.length === 0) {
       found.fusion.degraded.push('anchor');
       found.fusion.reasons.anchor = looksLikePath(target)

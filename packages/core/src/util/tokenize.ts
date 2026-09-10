@@ -18,10 +18,12 @@
 /** Bump when the token stream changes shape. Postings built under an older
  *  value cannot be queried with a newer one -- `doctor` reports the mismatch
  *  rather than letting a half-matching index look healthy. */
-export const TOKENIZER_VERSION = 2;
+export const TOKENIZER_VERSION = 3;
 
 /** Scripts this tokenizer claims to handle, for the capability line. */
-export const TOKENIZER_SCRIPTS = ['latin', 'latin-diacritics', 'cyrillic', 'greek', 'cjk-bigram'];
+export const TOKENIZER_SCRIPTS = [
+  'latin', 'latin-diacritics-dual', 'cyrillic', 'greek', 'cjk-bigram',
+];
 
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'has', 'have',
@@ -74,19 +76,37 @@ export function tokenize(text: string): string[] {
       continue;
     }
 
+    const english = isAscii(raw);
     const folded = fold(raw);
-    const lower = folded.toLowerCase();
     const parts = splitIdentifier(folded);
-    if (parts.length > 1) out.push(lower);
+    if (parts.length > 1) out.push(folded.toLowerCase());
+
     // English rules -- the stopword list and the suffix stripper -- only apply
     // to a word that was ASCII before folding. Folding moves other languages
     // into English's space and they collide there: Vietnamese "thẻ" (card)
     // folds to "the" and would be dropped as an article.
-    const english = isAscii(raw);
     for (const part of parts) {
       if (part.length < 2) continue;
       if (english && STOPWORDS.has(part)) continue;
       out.push(english ? stem(part) : part);
+    }
+
+    // Both forms, for a word that carries marks.
+    //
+    // Folding alone merges words that Vietnamese keeps apart: "bò" (beef),
+    // "bỏ" (drop) and "bó" (bundle) all became "bo", so "phở bò" matched a
+    // document that said "đã bị bỏ". Dropping the fold instead would mean an
+    // unaccented query stops finding accented text, and people do type without
+    // accents.
+    //
+    // Emitting both leaves the marked form to carry the meaning and the folded
+    // form to carry the reach. It does not stop "bò" matching "bỏ" -- they still
+    // share "bo" -- it makes the document that also matches "bỏ" score on two
+    // terms where the other scores on one, and IDF discounts the shared form
+    // because it appears everywhere. Ranking separates them; no extra rule does.
+    if (!english) {
+      const marked = raw.toLowerCase();
+      if (marked.length >= 2 && marked !== folded.toLowerCase()) out.push(marked);
     }
   }
   return out;

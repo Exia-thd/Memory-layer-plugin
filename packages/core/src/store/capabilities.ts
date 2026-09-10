@@ -1,4 +1,6 @@
-import { Database, Connection } from '@ladybugdb/core';
+// Types only -- erased at compile time, so it does not load the binary.
+import type { Database, Connection } from '@ladybugdb/core';
+import { nativeLbug } from './native.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Capabilities, Capability } from '../types.js';
@@ -63,8 +65,8 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
   try {
     // Probing happens before the real store exists, so the directory may not be there yet.
     fs.mkdirSync(storeDir, { recursive: true });
-    db = new Database(probeDir);
-    conn = new Connection(db);
+    db = new (nativeLbug().Database)(probeDir);
+    conn = new (nativeLbug().Connection)(db);
     await conn.query('RETURN 1');
   } catch (err) {
     capabilities.graph = {

@@ -94,7 +94,10 @@ async function preTool(cwd, payload) {
   const target = payload?.tool_input?.file_path || payload?.tool_input?.pattern;
   if (!target || typeof target !== 'string') return;
 
-  const why = await runCli(cwd, ['why', target, '--limit', '3', '--json']);
+  // --anchor-only: this hook fires on every Read, Grep and Glob, and only needs
+  // the provenance anchor. Loading the embedding model here cost 2.5s of the
+  // 10s budget on every file the agent touched.
+  const why = await runCli(cwd, ['why', target, '--limit', '3', '--anchor-only', '--json']);
   const hits = why?.results ?? [];
   if (hits.length === 0) return;
 

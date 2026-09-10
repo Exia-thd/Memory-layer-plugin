@@ -58,7 +58,7 @@ into the session; nothing needs to be configured by hand.
 | `memory init` | Create the store, probe what works, report it |
 | `memory ingest <paths>` | Load files into the one store — no import step |
 | `memory search <query>` | Three-branch retrieval with a fusion report |
-| `memory why <file\|symbol>` | Decisions and constraints touching it — a bare symbol anchors on the declaration |
+| `memory why <file\|symbol> [--anchor-only]` | Decisions and constraints touching it — a bare symbol anchors on the declaration. `--anchor-only` skips the embedding model, which costs ~2.5 s |
 | `memory changes [--scope S]` | What memory records about the files you are about to commit |
 | `memory get <id>` | One node in full, with its edges |
 | `memory graph <id> --depth N` | Walk the memory graph |
@@ -197,10 +197,15 @@ semantic ones do not. Decay demotes; it does not remove.
 
 ## Known limits
 
-- **Process startup costs more than search now.** A cold CLI command spends
-  231 ms loading modules -- chiefly the native database binding, which even
-  `memory help` pays for -- against roughly 180 ms of actual work at 20,000
-  nodes. Deferring that load is the next worthwhile change.
+- **Process startup still costs more than the work.** `memory --help` is 318 ms,
+  of which 225 ms is node itself. The MCP SDK used to be loaded on every command
+  and is now imported only by `serve`; the database binding loads on first use.
+  What is left is node's own start, which a long-lived MCP server pays once and
+  a CLI call pays every time.
+- **`memory list` is linear in projects.** Marginal cost measured 14.5 ms per
+  project at five, 20.8 ms at fifty, despite a pool limit of eight: process
+  spawn on Windows barely overlaps, so the pool buys close to nothing. Fifty
+  projects take about 1.3 s. Usable, but not the concurrency the code implies.
 - **Semantic search is still an exact scan.** There is no vector index on these
   platforms, so its cost grows with the number of embedded nodes even though the
   scan now happens inside the database.

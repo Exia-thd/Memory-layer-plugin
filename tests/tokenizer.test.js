@@ -27,9 +27,31 @@ test('an accented word survives tokenization', () => {
 });
 
 test('an unaccented query reaches accented text', () => {
-  // How people actually search their own notes.
-  assert.deepEqual(tokenize('quyet dinh'), tokenize('quyết định'));
-  assert.deepEqual(tokenize('loi thanh toan'), tokenize('lỗi thanh toán'));
+  // How people actually search their own notes. The accented form indexes both
+  // shapes, so the unaccented tokens are a subset of it and every one matches.
+  for (const [plain, accented] of [
+    ['quyet dinh', 'quyết định'],
+    ['loi thanh toan', 'lỗi thanh toán'],
+  ]) {
+    const reach = new Set(tokenize(accented));
+    for (const token of tokenize(plain)) {
+      assert.ok(reach.has(token), `"${plain}" token ${token} does not reach "${accented}"`);
+    }
+  }
+});
+
+test('the accented form is kept as well as the folded one', () => {
+  // Folding alone merged words Vietnamese keeps apart: "bò" (beef), "bỏ" (drop)
+  // and "bó" (bundle) all became "bo", so "phở bò" matched a document that said
+  // "đã bị bỏ". Both forms are indexed, so the marked one still distinguishes.
+  for (const word of ['bỏ', 'bò', 'thử', 'thứ']) {
+    const tokens = tokenize(word);
+    assert.ok(tokens.includes(word), `"${word}" lost its accented form: ${JSON.stringify(tokens)}`);
+    assert.ok(tokens.includes(fold(word)), `"${word}" lost its folded form`);
+  }
+  // And they no longer collapse onto one another.
+  assert.notDeepEqual(tokenize('bò'), tokenize('bỏ'));
+  assert.notDeepEqual(tokenize('thử'), tokenize('thứ'));
 });
 
 test('distinct words stay distinct', () => {
@@ -42,7 +64,7 @@ test('distinct words stay distinct', () => {
 test('English rules do not reach folded words from other languages', () => {
   // "thẻ" folds to "the", which is an English article. Applying the stopword
   // list after folding would delete a Vietnamese noun.
-  assert.deepEqual(tokenize('thẻ'), ['the']);
+  assert.ok(tokenize('thẻ').includes('the'), 'the folded form was dropped as an article');
   assert.deepEqual(tokenize('the'), []);
   // Stemming is likewise English-only; a folded syllable is left alone.
   assert.deepEqual(tokenize('retries'), tokenize('retry'));
@@ -105,6 +127,33 @@ test('doctor fails when the postings were built by another tokenizer', async () 
     const after = stale.checks.find((check) => check.name === 'tokenizer version');
     assert.equal(after.status, 'fail', `expected a failure, got: ${after.detail}`);
     assert.match(after.detail, /ingest --force/);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('an accented query ranks the word it actually asked for first', async () => {
+  // The point of indexing both forms is not that "bò" stops matching "bỏ" --
+  // they still share the folded token. It is that the document which matches the
+  // marked form as well scores on two terms where the other scores on one, so
+  // ranking separates them. This pins that, because branch counts do not show it.
+  const repo = makeRepo({
+    'docs/drop.md': '# Bỏ tính năng\n\nLần thử thứ ba đã bị bỏ khỏi quy trình năm 2024.\n',
+    'docs/beef.md': '# Thịt bò\n\nMón phở bò truyền thống dùng thịt bò tươi.\n',
+  });
+  try {
+    cli(repo, ['init']);
+    cli(repo, ['ingest', 'docs']);
+
+    const dropped = JSON.parse(cli(repo, ['search', 'bỏ', '--limit', '2', '--json']));
+    assert.match(dropped.results[0].sourceRef, /drop\.md/, 'the accented query lost to the collision');
+
+    const beef = JSON.parse(cli(repo, ['search', 'bò', '--limit', '2', '--json']));
+    assert.match(beef.results[0].sourceRef, /beef\.md/, 'the accented query lost to the collision');
+
+    // And the unaccented form still reaches both, which is why folding exists.
+    const plain = JSON.parse(cli(repo, ['search', 'bo', '--limit', '2', '--json']));
+    assert.equal(plain.results.length, 2, 'the unaccented query stopped reaching both');
   } finally {
     repo.cleanup();
   }

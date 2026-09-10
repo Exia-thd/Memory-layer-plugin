@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { Database, Connection } from '@ladybugdb/core';
+// Types only -- erased at compile time, so it does not load the binary.
+import type { Database, Connection } from '@ladybugdb/core';
+import { nativeLbug } from './native.js';
 import type { MemoryNode, MemoryEdge, EdgeType, Layer, StoreStats, SymbolRow } from '../types.js';
 import { EDGE_TYPES } from '../types.js';
 import { ddl, SCHEMA_VERSION } from './schema.js';
@@ -111,13 +113,13 @@ export class MemoryStore {
     if (this.conn) return this.conn;
 
     try {
-      this.db = new Database(
+      this.db = new (nativeLbug().Database)(
         this.dbPath,
         this.options.bufferPoolBytes ?? 0,
         true,
         this.readOnly,
       );
-      this.conn = new Connection(this.db);
+      this.conn = new (nativeLbug().Connection)(this.db);
       await this.conn.query('RETURN 1');
     } catch (err) {
       this.db = null;

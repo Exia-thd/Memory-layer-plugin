@@ -5,7 +5,11 @@ import {
 } from '@memory-layer/core';
 import * as api from './api.js';
 import { resolveProject, storeDirOrThrow } from './project.js';
-import { serve } from './mcp.js';
+// Imported where it is used, not at the top.
+//
+// `mcp.js` drags in the MCP SDK, which cost 290ms on every command that is not
+// `serve` -- `memory --help` included. One command needs it; the rest were
+// paying for it.
 
 /**
  * Every command returns a process exit code, and a failure exits non-zero with
@@ -158,7 +162,10 @@ async function main(argv: string[]): Promise<number> {
     case 'why': {
       const target = args.positional[0];
       if (!target) throw new Error('why needs a file path or symbol');
-      const result = await api.runWhy(target, { limit: numberFlag(args, 'limit') });
+      const result = await api.runWhy(target, {
+        limit: numberFlag(args, 'limit'),
+        anchorOnly: Boolean(args.flags['anchor-only']),
+      });
       emit(args, result, () => formatSearch(result));
       return 0;
     }
@@ -378,6 +385,7 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case 'serve': {
+      const { serve } = await import('./mcp.js');
       await serve();
       return 0;
     }
