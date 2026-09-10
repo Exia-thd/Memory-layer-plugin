@@ -33,7 +33,9 @@ làm việc ── plugin tự đọc, không cần bạn nhớ gì:
 memory write ────────────── ghi một quyết định, bằng tay, kèm lý do
         │
         ▼
-memory ingest docs src ──── sau khi file đổi (nên đặt vào post-commit)
+memory ingest ───────────── sau khi file đổi (nên đặt vào post-commit)
+        │  không tham số: chọn y như init đã chọn
+        │  thu hồi file không còn trên đĩa
         │  thay thế những gì file đó từng sinh ra
         │  ghi lại ui.html
         ▼
@@ -106,7 +108,7 @@ Rồi mở trang nó vừa ghi:
 ## Giữ cho nó không lạc hậu
 
 ```bash
-memory ingest docs src
+memory ingest
 ```
 
 Chạy lại rẻ: hash nội dung khiến file không đổi bị bỏ qua, lượt thứ hai trên 47
@@ -129,7 +131,7 @@ lại là idempotent, và không có phán đoán nào trong đó. Cái duy nh�
 gì**.
 
 ```bash
-printf 'memory ingest docs src || true\n' >> .git/hooks/post-commit
+printf 'memory ingest --quiet || true\n' >> .git/hooks/post-commit
 chmod +x .git/hooks/post-commit
 ```
 
@@ -153,6 +155,65 @@ memory write --layer semantic \
 chứng được, mà người ta vẫn sẽ tin nó.
 
 ---
+
+## Cái gì được nạp
+
+Bất cứ thứ gì là văn bản, đuôi nào cũng được và to nhỏ gì cũng được. Không có
+danh sách ngôn ngữ được hỗ trợ, vì một danh sách như vậy luôn sai một chút:
+danh mục của chính GitHub có khoảng một nghìn đuôi file, và bất kỳ tập con nào
+tự giữ bằng tay cũng sẽ bỏ sót đúng cái ngôn ngữ dự án bạn đang dùng. Đo trên
+một repo thật, danh sách cũ bỏ sót **một phần năm** số file — phần lớn là script
+shell — và không nói một lời nào.
+
+Nên câu hỏi được lật ngược. Bốn danh sách ngắn nói cái gì **không** bị quét vào,
+và cái nào cũng tự báo cáo:
+
+| Không nạp | Vì sao | Muốn nạp thì làm sao |
+|---|---|---|
+| `.png` `.pdf` `.docx` `.zip` … | Không phải văn bản, chẳng có gì để index | Để AI đọc phân tích rồi ghi lại kết luận |
+| `.env` `.pem` lockfile `*.min.js` | Bí mật và sổ sách của máy | Cố ý. Một credential không được phép chạm tới embedding |
+| `.svg` `.drawio` `.csv` `.html` `.xml` `.puml` | Tài liệu và bản xuất | `memory ingest docs/figma/tokens.svg` |
+| `node_modules` `dist` `build` `.git` … | Sinh tự động hoặc của bên thứ ba | `memory ingest docs/build` |
+
+Markdown **không bao giờ** nằm ở hàng thứ ba. Nó chính là định dạng mà người ta
+chuyển mọi thứ sang để đọc được, nên nó luôn được quét vào.
+
+Hàng thứ ba mới là hàng cần hiểu. Một bản xuất thiết kế hay một file PDF thường
+không đáng lưu nguyên: thứ đáng giữ là **kết luận** ai đó rút ra từ nó, ghi bằng
+`memory write` kèm `--source-ref` trỏ ngược về file. Vài nghìn mảnh toạ độ đường
+vẽ không phải là kết luận. Nhưng đôi khi chính file đó là tài liệu tham chiếu, và
+**gọi đích danh thì luôn thắng** — thắng luật này, thắng danh sách chặn thư mục,
+và thắng cả ngưỡng dung lượng.
+
+Mọi lần bỏ qua đều được in ra kèm lý do và kèm đường thoát:
+
+```
+ingested 12 files (0 unchanged) -> 12 new, 12 embedded
+skipped 4:
+   2 not text (.pdf .png)
+      nothing to index; read it with an agent and record the conclusion
+   1 not indexed unless named (.svg)
+      name the file to index it anyway
+   1 excluded directory (build)
+      name the directory to index it anyway
+   --verbose to list them
+```
+
+Bỏ qua là một quyết định hợp lý. Bỏ qua **trong im lặng** mới là cách một kho
+ký ức trở nên vừa được tin vừa thiếu sót.
+
+### Dung lượng
+
+Mã nguồn và văn bản **không bao giờ** bị từ chối vì lớn. Một module lớn là một
+phần lớn của dự án, và một tầng âm thầm từ chối index những file lớn nhất thì tệ
+hơn một tầng chạy hơi lâu.
+
+Chi phí là thật, và nó tính bằng **số chunk chứ không phải số byte** — hai thứ
+này lệch nhau rất xa. Đo được: 3 MB văn bản thành 3 444 chunk, còn 300 KB mã
+nguồn dày đặc khai báo thành **7 494** chunk, vì chunker cắt theo biên khai báo.
+File nào đẻ ra số chunk bất thường sẽ được **nêu tên** trong báo cáo chứ không bị
+từ chối — vì từ đây nhìn vào, một API client sinh tự động và một module lõi viết
+tay trông y hệt nhau, chỉ bạn mới biết cái nào là cái nào.
 
 ## Bốn thứ bạn thực sự sẽ chạy
 

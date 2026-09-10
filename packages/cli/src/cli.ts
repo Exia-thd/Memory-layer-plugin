@@ -52,7 +52,7 @@ function announceScan(root: string, quiet: boolean): string[] {
  * Quiet under --json, where anything on stdout is no longer JSON.
  */
 function chooseScan(args: Args, root: string): string[] {
-  const quiet = Boolean(args.flags.json);
+  const quiet = Boolean(args.flags.json) || Boolean(args.flags.quiet);
   if (args.positional.length > 0) {
     if (!quiet) process.stdout.write(`scanning ${args.positional.join(', ')}\n`);
     return args.positional;
@@ -105,7 +105,7 @@ const USAGE = `memory - project memory layer
 
   memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
   memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
-                          [--verbose] [--max-file-size MB]   no paths: scan the project
+                          [--verbose] [--quiet] [--max-file-size MB]  no paths: scan the project
   memory embed [--force]              embed nodes missing a current vector
   memory search <query> [--limit N] [--layer L] [--json]
   memory why <file|symbol> [--json]   decisions and constraints touching it
@@ -306,7 +306,7 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
         embed: !args.flags['no-embed'],
         maxFileBytes: maxFileBytes(args),
       });
-      emit(args, report, () =>
+      if (!args.flags.quiet) emit(args, report, () =>
         `ingested ${report.files} files (${report.skipped} unchanged) -> ` +
         `${report.created} new, ${report.refreshed} refreshed, ${report.embedded} embedded` +
         (report.vanished > 0 ? `
@@ -326,7 +326,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       );
       if (report.created + report.refreshed + report.removed > 0 && !args.flags['no-ui']) {
         const page = await refreshUi();
-        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}\n`);
+        if (page && !args.flags.json && !args.flags.quiet) process.stdout.write(`refreshed ${page}\n`);
       }
       return 0;
     }
@@ -557,7 +557,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       });
       if (report.removed > 0 && !args.flags['no-ui']) {
         const page = await refreshUi();
-        if (page && !args.flags.json) process.stdout.write(`refreshed ${page}\n`);
+        if (page && !args.flags.json && !args.flags.quiet) process.stdout.write(`refreshed ${page}\n`);
       }
       return 0;
     }

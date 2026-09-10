@@ -328,3 +328,23 @@ test('a project with nothing conventional says so instead of failing obscurely',
     repo.cleanup();
   }
 });
+
+test('--quiet prints nothing, because a post-commit hook should not chatter', async () => {
+  const repo = makeRepo({
+    'docs/note.md': '# Note\n\nyankee zulu.\n',
+    'docs/shot.png': 'bytes\n',
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    // The documented post-commit hook used this flag and it did not exist: it
+    // parsed as an unknown flag and was ignored, so the hook printed a full
+    // report on every commit. A flag a document promises has to be real.
+    const out = cli(repo, ['ingest', '--quiet']);
+    assert.equal(out.trim(), '', `--quiet still printed: ${JSON.stringify(out)}`);
+
+    // Silent, not inert.
+    assert.match(cli(repo, ['search', 'yankee zulu']), /note\.md/, '--quiet skipped the work');
+  } finally {
+    repo.cleanup();
+  }
+});

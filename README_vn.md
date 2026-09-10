@@ -68,7 +68,7 @@ Hướng dẫn theo từng việc, kể cả nên tự động hoá cái gì và
 | Lệnh | Làm gì |
 |---|---|
 | `memory init [paths...]` | Tạo kho, quét dự án, dựng code graph và trang xem |
-| `memory ingest <paths>` | Nạp file — thay thế những gì chúng từng sinh ra, ghi lại trang xem |
+| `memory ingest [paths]` | Nạp file — không tham số thì tự quét dự án. Thay thế bản cũ, thu hồi thứ đã biến mất, ghi lại trang xem |
 | `memory search <query>` | Truy hồi ba nhánh, kèm báo cáo hợp nhất |
 | `memory why <file\|symbol>` | Quyết định và ràng buộc chạm tới nó |
 | `memory changes [--scope S]` | Ký ức nói gì về những file bạn sắp commit |

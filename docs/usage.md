@@ -34,8 +34,10 @@ work ── the plugin reads on its own:
 memory write ────────────── a decision, by hand, with the reason
         │
         ▼
-memory ingest docs src ──── after files change (put it in post-commit)
+memory ingest ───────────── after files change (put it in post-commit)
+        │  no paths: the same choice init made
         │  replaces what those files produced before
+        │  reclaims files that are no longer on disk
         │  rewrites ui.html
         ▼
 memory prune ────────────── occasionally: old episodic notes nothing points at
@@ -86,7 +88,7 @@ differently from the text. The first run downloads about 23 MB into
 Then load the project:
 
 ```bash
-memory ingest docs src
+memory ingest
 ```
 
 Re-running is cheap. Content hashes mean an unchanged file is skipped, so a
@@ -125,6 +127,65 @@ memory write --layer semantic \
 will be believed anyway.
 
 ---
+
+## What gets indexed
+
+Anything that is text, whatever the extension and whatever the size. There is no
+list of supported languages, because a list of supported languages is always
+slightly wrong: GitHub's own catalogue runs to roughly a thousand extensions,
+and any hand-kept subset silently omits whichever language your project uses.
+Measured against a real repository, the previous list missed a fifth of its
+files -- mostly shell scripts -- and said nothing about it.
+
+So the question is inverted. Four short lists say what is *not* swept up, and
+every one of them reports itself:
+
+| Not indexed | Why | How to get it in |
+|---|---|---|
+| `.png` `.pdf` `.docx` `.zip` … | Not text; there is nothing to index | Read it with an agent and record the conclusion |
+| `.env` `.pem` lockfiles `*.min.js` | Credentials and machine bookkeeping | Deliberate. A credential must not reach an embedding |
+| `.svg` `.drawio` `.csv` `.html` `.xml` `.puml` | Documents and exports | `memory ingest docs/figma/tokens.svg` |
+| `node_modules` `dist` `build` `.git` … | Generated or vendored | `memory ingest docs/build` |
+
+Markdown is never in the third row. It is the format things get converted into
+precisely so they can be read, so it is always swept up.
+
+The third row is the one to understand. A design export or a PDF is usually not
+worth storing whole: what is worth keeping is the conclusion somebody drew from
+it, written with `memory write` and a `--source-ref` pointing back at the file.
+A few thousand chunks of path coordinates are not that. But sometimes the file
+itself is the reference, and naming it outright always wins -- over this rule,
+over the directory block list, and over the size guard.
+
+Every skip is printed with its reason and its way out:
+
+```
+ingested 12 files (0 unchanged) -> 12 new, 12 embedded
+skipped 4:
+   2 not text (.pdf .png)
+      nothing to index; read it with an agent and record the conclusion
+   1 not indexed unless named (.svg)
+      name the file to index it anyway
+   1 excluded directory (build)
+      name the directory to index it anyway
+   --verbose to list them
+```
+
+Skipping is a fine decision. Skipping quietly is how a store ends up trusted and
+incomplete at the same time.
+
+### Size
+
+Source and prose are never refused for being large. A big module is a big part
+of the project, and a layer that quietly declines to index the largest files is
+worse than one that takes a while over them.
+
+The cost is real, and it is chunks rather than bytes -- the two come apart
+badly. Measured: 3 MB of prose becomes 3,444 chunks, while 300 KB of densely
+declared source becomes 7,494, because chunking cuts at declaration boundaries.
+A file that produces an outsized number of chunks is named in the report rather
+than refused, because a generated API client and a hand-written core module look
+identical from here and only you know which it is.
 
 ## The four things you will actually run
 
