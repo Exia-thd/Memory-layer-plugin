@@ -126,6 +126,35 @@ graph LR
   F0S0 -.->|about| F0S0M0["Retry policy"]
 ```
 
+### `memory ui`
+
+One HTML file with everything baked in. No server, no build step — open it from
+the filesystem.
+
+```bash
+memory ui                     # writes .memory-layer/ui.html
+memory ui src/store           # narrowed to a path
+memory ui --out graph.html    # somewhere you can mail it
+```
+
+Three tabs: a 3D graph of files, declarations and the memory about them; the
+store as a filterable table; and the `doctor` report.
+
+**It is read-only, and a snapshot.** Every write in this system is a short-lived
+process, which is what lets several sessions run at once without fighting over
+the store — a page holding a write connection would break exactly that. Where an
+action would change something, the page gives you the command. Re-run
+`memory ui` after changing the store.
+
+The 3D view fetches its library from a CDN, so the first open needs a network.
+If it cannot, the page says which of the two things went wrong instead of
+showing an empty canvas — a blank graph reads as "there is nothing in here",
+which is a very different and much worse message. The other tabs work either
+way; their data is inline.
+
+Above 1500 nodes it keeps the most important and says how many it dropped.
+Narrow it with a path.
+
 ### `memory doctor`
 
 What is actually working. Run it when results feel wrong, and in CI:

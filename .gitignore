@@ -8,3 +8,6 @@ scratchpad/
 # Model weights: cached at runtime, never committed.
 mlcache/
 models/
+
+# Generated viewer
+ui.html

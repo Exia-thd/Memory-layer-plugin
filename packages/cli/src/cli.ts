@@ -30,6 +30,7 @@ const USAGE = `memory - project memory layer
   memory changes [--scope S] [--base R]  what memory records about your changed files
   memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
   memory prune [--older-than 90] [--dry-run]  forget old, unreferenced episodic memories
+  memory ui [path] [--out FILE]       build a browser view of the graph and the store
   memory session start <label> | end [--summary S] | (none)   open, close or show the session
   memory summarize <clusterId> --body S   record a summary for a group of memories
   memory conflicts [--json]           contradictions needing a person
@@ -367,6 +368,16 @@ async function main(argv: string[]): Promise<number> {
         );
         return lines.join('\n');
       });
+      return 0;
+    }
+
+    case 'ui': {
+      const { runUi } = await import('./ui.js');
+      const built = await runUi({ prefix: args.positional[0], out: stringFlag(args, 'out') });
+      emit(args, built, () =>
+        `${built.file}\n${built.nodes} nodes${built.truncated ? ' (trimmed -- narrow it with a path)' : ''}` +
+        '\nA snapshot: re-run after changing the store. Open it in a browser.',
+      );
       return 0;
     }
 

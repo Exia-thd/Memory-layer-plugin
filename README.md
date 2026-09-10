@@ -73,6 +73,7 @@ A task-by-task guide is in [docs/usage.md](docs/usage.md).
 | `memory write` / `memory link` | Record a memory, or relate two |
 | `memory merge` | Fold queued session writes into the store |
 | `memory list` | Registered projects, with index freshness |
+| `memory ui [path] [--out FILE]` | Build a browser view: 3D graph, the store, and health |
 | `memory prune [--older-than N] [--dry-run]` | Forget old, unreferenced episodic memories |
 | `memory doctor` | What is actually working |
 | `memory serve` | MCP server on stdio |
