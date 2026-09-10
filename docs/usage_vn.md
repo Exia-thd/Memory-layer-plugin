@@ -429,6 +429,82 @@ gì ghi thì hook vẫn im hoàn toàn**, nên chi phí luôn tỉ lệ với m�
 vì cùng lý do đó. `memory changes` đã báo số bỏ sót từ ngày nó được viết; đúng
 hai lệnh mà hook gọi thì lại không.
 
+### GraphRAG, giờ mới thật sự truy xuất
+
+`search.ts` **không duyệt một cạnh nào**. Mọi liên kết ghi giữa các quyết định —
+SUPERSEDES, CONTRADICTS, DERIVED_FROM — chỉ ảnh hưởng tới `memory conflicts` và
+`memory graph`, không ảnh hưởng gì tới kết quả tìm kiếm. Gọi thứ đó là GraphRAG
+là hứa một điều không xảy ra.
+
+Fusion giờ có **nhánh thứ tư**. Nó đi **một bước** từ những gì ba nhánh kia tìm
+được, **theo cả hai chiều**, và xếp hạng hàng xóm theo **số kết quả độc lập cùng
+trỏ tới nó**:
+
+```
+search "quebecpayment"
+   bm25/semantic tìm:   "Retry twice on quebecpayment"
+   graph đi một bước:   "Ledger holds sierrafunds twice"   <- không trùng chữ nào
+```
+
+Ba lựa chọn đáng biết. **Một bước**, vì một quyết định cách ba liên kết thì liên
+quan theo kiểu mọi thứ trong một đồ thị nhỏ đều liên quan với nhau, và fusion sẽ
+xếp cái nhiễu đó ngang hàng với kết quả trúng thật. **Cả hai chiều**, để
+`A SUPERSEDES B` nổi A lên khi B trúng — biết thứ mình vừa khớp đã bị thay thế
+chính là lúc câu trả lời lạc hậu gây hại nhất. Và **hàng xóm mà nhánh khác đã
+tìm ra thì bị loại**, vì fusion thưởng cho sự đồng thuận giữa các nhánh, một
+nhánh vọng lại chính đầu vào của mình sẽ thổi phồng đúng những kết quả không cần
+giúp.
+
+Trên một kho chưa ai nối gì thì nó **không đóng góp gì** — đó là trạng thái bình
+thường, không phải lỗi — nên nó **nói ra**, thay vì trả về danh sách rỗng đọc y
+hệt một nhánh chạy rồi không khớp:
+
+```
+graphWalk  ok  one-hop-neighbours
+fusion: bm25=3 semantic=3 recency=3 graph=0
+        graph: Nothing the other branches found is linked to anything.
+               Record links with `memory link`.
+```
+
+`graph` trong báo cáo sức khoẻ là **engine cơ sở dữ liệu**; `graphWalk` là
+**nhánh truy xuất** này. Hai thứ khác nhau, và gọi chung một tên sẽ giấu lỗi của
+cái này sau dòng xanh của cái kia.
+
+### Chọn trước, đọc sau
+
+Một kết quả đầy đủ mang theo 220 ký tự trích đoạn, tốn chừng sáu mươi token.
+`memory index` trả về **cùng thứ hạng** nhưng chỉ có tiêu đề, lớp và source_ref —
+khoảng **mười lăm** token — nên ngân sách trước đây hiện được sáu mục thì giờ phủ
+hơn hai mươi:
+
+```bash
+memory index "retry"            # danh sách tiêu đề để chọn
+memory search "retry"           # đọc kỹ những cái đáng, có trích đoạn
+memory get <id>                 # một cái, đầy đủ
+```
+
+Cả hai đều nhận `--offset`. `3 more of 9 not shown -- --offset 6` giờ là thứ bạn
+**làm được gì đó**, chứ không còn là một lời xin lỗi.
+
+### .memignore
+
+Câu trả lời của chính dự án về thứ nên nằm ngoài kho. Cú pháp gitignore, đặt ở
+gốc repo:
+
+```
+# sinh lại được, và không ai quyết định gì trong đó
+exports/
+scratch.md
+src/generated/
+*.bak
+!keep.bak
+```
+
+Các danh sách dựng sẵn là phỏng đoán về repo nói chung, mà phỏng đoán về repo nói
+chung thì sai với từng repo cụ thể. File này **không bao giờ thắng** một đường dẫn
+được gọi đích danh — `memory ingest docs/exports` vẫn đọc thư mục đó dù luật nói
+gì, vì một chỉ thị đưa ra **bây giờ** đứng trên một luật viết **từ trước**.
+
 ## Nhiều dự án
 
 ```bash
@@ -453,6 +529,7 @@ một khách hàng xuất hiện trong repo khác là một sự cố, không ph
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Trần byte cho output tool MCP (mặc định 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Ngân sách token trước Read/Grep/Glob (mặc định 400) |
 | `MEMORY_LAYER_SESSION_TOKENS` | Ngân sách token cho ràng buộc đầu phiên (mặc định 700) |
+| `MEMORY_LAYER_MAX_FILE_MB` | Chặn file phình bất thường (mặc định 20) |
 
 Trên Windows, giữ đường dẫn cache model **ngắn**. Mặc định nó nằm sâu dưới pnpm,
 và đường dẫn quá 260 ký tự sẽ hỏng với thông báo `File doesn't exist` — đọc y hệt

@@ -36,6 +36,19 @@ const BUDGET_MS = 7000;
 const TOKEN_BUDGET = Number(process.env.MEMORY_LAYER_HOOK_TOKENS ?? 400);
 const SESSION_TOKEN_BUDGET = Number(process.env.MEMORY_LAYER_SESSION_TOKENS ?? 700);
 
+/**
+ * A hook entry is a title and a source_ref, not a snippet.
+ *
+ * A full search hit carries 220 characters of body and runs about sixty tokens,
+ * so a 400-token budget showed six of them and apologised for the rest. Without
+ * the snippet an entry is roughly fifteen, and the same budget covers more than
+ * twenty -- which is the difference between handing the agent a few entries and
+ * handing it the shape of what is recorded, to choose from.
+ *
+ * The snippets are not lost. `memory_get` and `memory_why` fetch them for the
+ * entries worth opening, which is the point: pick from a list, then read.
+ */
+
 /** Four characters per token: rough, and on the safe side for prose and code. */
 function tokensOf(text) {
   return Math.ceil(text.length / 4);

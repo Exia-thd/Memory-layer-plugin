@@ -70,6 +70,7 @@ A task-by-task guide is in [docs/usage.md](docs/usage.md).
 | Command | Purpose |
 |---|---|
 | `memory init [paths...]` | Create the store, scan the project, build the code graph and the viewer |
+| `memory index <query>` | Titles only, ~15 tokens each — pick before you read |
 | `memory ingest [paths]` | Load files — no paths scans the project. Replaces what they produced before, reclaims what is gone, refreshes the viewer |
 | `memory search <query>` | Three-branch retrieval with a fusion report |
 | `memory why <file\|symbol> [--anchor-only]` | Decisions and constraints touching it — a bare symbol anchors on the declaration. `--anchor-only` skips the embedding model, which costs ~2.5 s |

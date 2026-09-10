@@ -5,6 +5,30 @@ export type Layer = 'semantic' | 'episodic' | 'procedural' | 'artifact';
 
 export const LAYERS: readonly Layer[] = ['semantic', 'episodic', 'procedural', 'artifact'];
 
+/**
+ * What a layer is worth, and therefore what survives.
+ *
+ * One number doing two jobs, which is the point: the thing worth ranking highly
+ * is the thing worth keeping, and holding those as separate settings lets them
+ * drift until a store forgets its decisions and keeps its logs.
+ *
+ * The ordering is the argument. A decision is why the code is shaped as it is
+ * and does not expire -- it is superseded by another decision or it stands. A
+ * procedure is how something is done here, durable but replaceable. An artifact
+ * chunk is derived: ingest rebuilds it from the file, so losing one costs a
+ * re-index and nothing else. An episodic note is what happened once, useful for
+ * days and clutter after months.
+ *
+ * `prune` reads this rather than naming one layer, so "forget the cheap things
+ * first" is expressed once instead of hardcoded at the call site.
+ */
+export const LAYER_WEIGHTS: Record<Layer, number> = {
+  semantic: 10,
+  procedural: 7,
+  artifact: 3,
+  episodic: 2,
+};
+
 /** Edge labels carry real meaning; there is deliberately no `relates_to`. */
 export type EdgeType =
   | 'RESOLVES'
@@ -128,6 +152,8 @@ export interface SearchResult {
    */
   total?: number;
   omitted?: number;
+  /** Where this page started, so the caller can ask for the next one. */
+  offset?: number;
 }
 
 export interface StoreStats {

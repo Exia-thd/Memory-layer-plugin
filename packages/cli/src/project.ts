@@ -85,8 +85,7 @@ const SCAN_CANDIDATES = [
   // common of the two was the one the scan could not see.
   'src', 'lib', 'libs', 'app', 'apps', 'packages', 'package',
   'internal', 'pkg', 'cmd', 'service', 'services',
-  'README.md', 'README.rst', 'ARCHITECTURE.md', 'CONTRIBUTING.md',
-  'CHANGELOG.md', 'DECISIONS.md',
+  'README.rst',
 ];
 
 /** What a directory holds when it is a project rather than a pile of files. */
@@ -147,6 +146,25 @@ export function describeScanTargets(root: string): ScanTarget[] {
     if (nodeFs.existsSync(nodePath.join(root, candidate))) {
       chosen.set(candidate, { path: candidate, reason: 'conventional name' });
     }
+  }
+
+  // Every markdown file at the root, by rule rather than by name.
+  //
+  // The list used to name five of them, and `CLAUDE.md` was not among the five
+  // -- the file holding this project's own constraints, which is close to the
+  // most relevant document a memory layer could read, silently outside the
+  // scan. Any list of filenames has that failure waiting in it: the next
+  // convention (`AGENTS.md`, and whatever follows it) arrives already missing.
+  // Markdown at the root is written by people, for people, about this project.
+  // There is no version of that which is not worth reading.
+  try {
+    for (const entry of nodeFs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/\.(md|markdown|mdx)$/i.test(entry.name)) continue;
+      chosen.set(entry.name, { path: entry.name, reason: 'markdown' });
+    }
+  } catch {
+    // An unreadable root is reported by the caller that tries to scan it.
   }
 
   let entries: nodeFs.Dirent[] = [];

@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Database, Connection } from '@ladybugdb/core';
 import { nativeLbug } from './native.js';
 import type { MemoryNode, MemoryEdge, EdgeType, Layer, StoreStats, SymbolRow } from '../types.js';
-import { EDGE_TYPES } from '../types.js';
+import { EDGE_TYPES, LAYERS, LAYER_WEIGHTS } from '../types.js';
 import { ddl, SCHEMA_VERSION } from './schema.js';
 import { readMeta, writeMeta, bumpWriteSeq, type StoreMeta } from './meta.js';
 import { log } from '../util/log.js';
@@ -710,17 +710,34 @@ export class MemoryStore {
    * Episodic only by default. A decision is not noise however old it gets, and
    * an artifact chunk belongs to a file that ingest will re-derive anyway.
    */
-  async prunable(options: { layer?: string; olderThanDays: number }): Promise<MemoryNode[]> {
+  async prunable(options: {
+    layer?: string;
+    olderThanDays: number;
+    /** Layers at or below this weight are eligible. Ignored when `layer` is given. */
+    maxWeight?: number;
+  }): Promise<MemoryNode[]> {
     const cutoff = Date.now() - options.olderThanDays * 24 * 60 * 60 * 1000;
+
+    // Named layer wins; otherwise everything cheap enough to lose, ordered so
+    // the cheapest goes first. A decision is never in this set at any weight,
+    // however old -- age is not evidence that a decision stopped applying.
+    const layers = options.layer
+      ? [options.layer]
+      : LAYERS.filter((layer) => LAYER_WEIGHTS[layer] <= (options.maxWeight ?? 3));
+
     const rows = await this.run(
       `MATCH (m:Memory)
-       WHERE m.layer = $layer AND m.created_at < $cutoff
+       WHERE list_contains($layers, m.layer) AND m.created_at < $cutoff
          AND NOT EXISTS { MATCH (m)-[]-() }
        RETURN ${NODE_COLUMNS}
        ORDER BY m.created_at`,
-      { layer: options.layer ?? 'episodic', cutoff },
+      { layers, cutoff },
     );
-    return rows.map(rowToNode);
+
+    // Cheapest first, so a capped prune drops what matters least.
+    return rows
+      .map(rowToNode)
+      .sort((a, b) => LAYER_WEIGHTS[a.layer] - LAYER_WEIGHTS[b.layer] || a.createdAt - b.createdAt);
   }
 
   async symbolMap(prefix?: string): Promise<Array<SymbolRow & { memories: Array<{ id: string; title: string; layer: string }> }>> {

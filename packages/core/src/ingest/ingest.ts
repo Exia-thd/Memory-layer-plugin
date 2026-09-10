@@ -6,6 +6,7 @@ import type { Layer, MemoryNode } from '../types.js';
 import type { EmbeddingProvider } from '../embed/index.js';
 import { chunk, declarations } from './chunker.js';
 import { redact } from './redact.js';
+import { loadMemIgnore, isIgnored, type MemIgnore } from './memignore.js';
 import { nodeId, contentHash } from '../util/ids.js';
 import { log } from '../util/log.js';
 
@@ -44,6 +45,7 @@ export interface IngestReport {
 }
 
 export type IgnoreReason =
+  | '.memignore'
   | 'not text'
   | 'not indexed unless named'
   | 'secret or machine bookkeeping'
@@ -230,8 +232,9 @@ export async function ingest(
   const projectRoot = meta.projectRoot;
 
   const maxBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const ignore = loadMemIgnore(projectRoot);
   const files = targets.flatMap((target) =>
-    collectFiles(target, projectRoot, report.ignored, maxBytes));
+    collectFiles(target, projectRoot, report.ignored, maxBytes, ignore));
 
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
@@ -545,6 +548,7 @@ function collectFiles(
   root: string,
   ignored: IgnoredFile[],
   maxBytes: number,
+  ignore: MemIgnore,
 ): string[] {
   const resolved = resolveTarget(target, root);
   const label = (full: string) => {
@@ -577,21 +581,43 @@ function collectFiles(
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.name.startsWith('.') && entry.name !== '.claude') {
+      // Dot-directories are dependency caches, tool state and build output.
+      //
+      // `.claude` was excepted here, but nothing ever made it a scan target, so
+      // the exception could not fire -- a reader would conclude the layer
+      // indexes a project's agent configuration, and it does not. An exception
+      // that cannot run is worse than none: it describes behaviour that is not
+      // there. Name it to index it, like any other skipped directory.
+      if (entry.name.startsWith('.')) {
         if (entry.isDirectory()) {
           ignored.push({ path: label(full), reason: 'excluded directory', detail: entry.name });
         }
         continue;
       }
+      const relative = path.relative(root, full).split(path.sep).join('/');
+
       if (entry.isDirectory()) {
         if (SKIP_DIRECTORIES.has(entry.name)) {
           ignored.push({ path: label(full), reason: 'excluded directory', detail: entry.name });
+          continue;
+        }
+        // Checked before descending, so an ignored tree costs one test rather
+        // than one per file inside it.
+        const rule = isIgnored(ignore, relative, true);
+        if (rule) {
+          ignored.push({ path: label(full), reason: '.memignore', detail: rule.source });
           continue;
         }
         walk(full);
         continue;
       }
       if (!entry.isFile()) continue;
+
+      const fileRule = isIgnored(ignore, relative, false);
+      if (fileRule) {
+        ignored.push({ path: label(full), reason: '.memignore', detail: fileRule.source });
+        continue;
+      }
 
       const extension = path.extname(entry.name).toLowerCase();
       const lower = entry.name.toLowerCase();

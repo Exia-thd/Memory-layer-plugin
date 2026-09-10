@@ -12,6 +12,8 @@ import { readMeta } from '../store/meta.js';
 
 export interface SearchOptions {
   limit?: number;
+  /** How many ranked hits to skip. Fusion is deterministic, so pages are stable. */
+  offset?: number;
   layers?: Layer[];
   maxDistance?: number;
   /** Marks hits older than this as stale rather than hiding them. */
@@ -19,6 +21,8 @@ export interface SearchOptions {
   /** Set to disable the keyword branch; used by the test that guards the fusion report. */
   disableBm25?: boolean;
   disableSemantic?: boolean;
+  /** Set to skip the graph branch; used by the test that guards the fusion report. */
+  disableGraph?: boolean;
   now?: number;
 }
 
@@ -107,9 +111,16 @@ export async function search(
   });
   branches.push(await semanticBranch(store, query, embedder, limit, options));
   branches.push(recencyBranch(overlapRanked, postings, summaries, terms, limit, now, eligible));
+  branches.push(await graphBranch(store, branches, limit, wanted, options));
 
   const { hits, report } = fuse(branches);
-  const top = hits.slice(0, limit);
+
+  // Fusion is deterministic -- the same query over an unchanged store ranks the
+  // same way every time -- so an offset is a real page rather than a reshuffle.
+  // Without it, "6 more not shown" was an apology with no way to act on it: the
+  // only route to the seventh result was to ask for more of the first six.
+  const offset = Math.max(0, options.offset ?? 0);
+  const top = hits.slice(offset, offset + limit);
 
   // Only the winners are loaded in full.
   const nodes = await store.getNodes(top.map((hit) => hit.id));
@@ -135,7 +146,13 @@ export async function search(
   // What the limit cut. `hits` is what fusion actually found, so the difference
   // is the answer to "was there more" -- a question the caller could not ask
   // before, and therefore never did.
-  return { results, fusion: report, total: hits.length, omitted: Math.max(0, hits.length - results.length) };
+  return {
+    results,
+    fusion: report,
+    total: hits.length,
+    omitted: Math.max(0, hits.length - (offset + results.length)),
+    offset,
+  };
 }
 
 async function keywordHits(
@@ -316,6 +333,125 @@ function recencyBranch(
     .map((hit) => hit.id);
 
   return { name: 'recency', ranked };
+}
+
+/**
+ * One hop out from what the other branches found.
+ *
+ * Until this existed the memory graph was a thing you could query with separate
+ * commands and nothing more -- `search.ts` traversed zero edges. Calling that
+ * arrangement GraphRAG promised something it did not do: the edges recorded
+ * between decisions had no effect on what a search returned.
+ *
+ * The hop is deliberately one. A decision reached through two or three links is
+ * related to the query the way anything in a small graph is related to anything
+ * else, and fusion would rank that noise alongside a direct match. One hop says
+ * "the thing you found points at this", which is a claim worth making.
+ *
+ * Direction is ignored on purpose. `A SUPERSEDES B` should surface A when B is
+ * found -- the reader needs to know the thing they matched has been replaced,
+ * which is the case where a stale answer does the most damage.
+ *
+ * Seeds come from the branches already computed, so this costs one edge query
+ * and no extra ranking. Nodes the other branches already returned are dropped:
+ * fusion rewards agreement between branches, and a branch that echoes its own
+ * input would inflate exactly the results that needed no help.
+ */
+async function graphBranch(
+  store: MemoryStore,
+  branches: Branch[],
+  limit: number,
+  wanted: Set<Layer> | null,
+  options: SearchOptions,
+): Promise<Branch> {
+  if (options.disableGraph) {
+    return {
+      name: 'graph',
+      ranked: [],
+      unavailableReason: 'Skipped: disableGraph was set for this query.',
+    };
+  }
+
+  // The best few from each branch. Widening the seed set widens the noise, and
+  // a neighbour of a poor match is a poor match.
+  const seeds = new Set<string>();
+  for (const branch of branches) {
+    for (const id of branch.ranked.slice(0, Math.max(3, Math.ceil(limit / 2)))) seeds.add(id);
+  }
+  if (seeds.size === 0) {
+    return {
+      name: 'graph',
+      ranked: [],
+      degradedReason: 'No hits to walk from; the other branches matched nothing.',
+    };
+  }
+
+  let edges;
+  try {
+    edges = await store.edgesFor([...seeds]);
+  } catch (err) {
+    // A branch that failed must say so rather than contributing an empty list
+    // that reads identically to "walked, and found nothing".
+    return {
+      name: 'graph',
+      ranked: [],
+      unavailableReason: `Edge lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (edges.length === 0) {
+    return {
+      name: 'graph',
+      ranked: [],
+      degradedReason:
+        'Nothing the other branches found is linked to anything. Record links with `memory link`.',
+    };
+  }
+
+  // Ordered by how many separate seeds reach a neighbour: something two
+  // independent hits both point at is a better bet than something one does.
+  const reachedBy = new Map<string, number>();
+  for (const edge of edges) {
+    for (const [from, to] of [[edge.from, edge.to], [edge.to, edge.from]] as const) {
+      if (!seeds.has(from) || seeds.has(to)) continue;
+      reachedBy.set(to, (reachedBy.get(to) ?? 0) + 1);
+    }
+  }
+  if (reachedBy.size === 0) {
+    return {
+      name: 'graph',
+      ranked: [],
+      degradedReason: 'Every linked neighbour was already found by another branch.',
+    };
+  }
+
+  // Eligibility has to be re-established here rather than reused.
+  //
+  // The caller's predicate is closed over summaries fetched for the shortlist,
+  // and a graph neighbour is by definition outside it -- it did not match the
+  // query, which is the entire reason this branch exists. Reusing that
+  // predicate rejected every neighbour and made the branch look like it had run
+  // and found nothing.
+  const candidates = [...reachedBy.keys()];
+  const summaries = await store.nodeSummaries(candidates);
+  const ranked = [...reachedBy.entries()]
+    .filter(([id]) => {
+      const summary = summaries.get(id);
+      if (!summary) return false;
+      if (summary.supersededAt) return false;
+      return !wanted || wanted.has(summary.layer);
+    })
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit * 2)
+    .map(([id]) => id);
+
+  return ranked.length > 0
+    ? { name: 'graph', ranked }
+    : {
+        name: 'graph',
+        ranked: [],
+        degradedReason: 'Every linked neighbour was already found by another branch.',
+      };
 }
 
 /** A window around the first query term, so the excerpt shows why the hit matched. */

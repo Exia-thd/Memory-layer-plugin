@@ -68,6 +68,7 @@ Hướng dẫn theo từng việc, kể cả nên tự động hoá cái gì và
 | Lệnh | Làm gì |
 |---|---|
 | `memory init [paths...]` | Tạo kho, quét dự án, dựng code graph và trang xem |
+| `memory index <query>` | Chỉ tiêu đề, ~15 token mỗi mục — chọn trước khi đọc |
 | `memory ingest [paths]` | Nạp file — không tham số thì tự quét dự án. Thay thế bản cũ, thu hồi thứ đã biến mất, ghi lại trang xem |
 | `memory search <query>` | Truy hồi ba nhánh, kèm báo cáo hợp nhất |
 | `memory why <file\|symbol>` | Quyết định và ràng buộc chạm tới nó |

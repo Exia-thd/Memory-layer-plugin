@@ -408,6 +408,82 @@ stays proportional to how useful the answer was.
 same reason. `memory changes` had reported an omitted count since it was
 written; the two commands the hooks actually call did not.
 
+### GraphRAG, actually retrieving
+
+`search.ts` traversed zero edges. Every link recorded between decisions --
+SUPERSEDES, CONTRADICTS, DERIVED_FROM -- affected `memory conflicts` and
+`memory graph` and nothing else, so the edges had no bearing on what a search
+returned. Calling that GraphRAG promised something that was not happening.
+
+Fusion now has a fourth branch. It walks one hop out from what the other three
+found, in either direction, and ranks a neighbour by how many separate hits
+reach it:
+
+```
+search "quebecpayment"
+   bm25/semantic find:  "Retry twice on quebecpayment"
+   graph walks one hop: "Ledger holds sierrafunds twice"   <- shares no wording
+```
+
+Three choices worth knowing. **One hop**, because a decision reached through
+three links is related the way anything in a small graph is related to anything
+else, and fusion would rank that noise beside a direct match. **Either
+direction**, so `A SUPERSEDES B` surfaces A when B matches -- being shown the
+decision you matched has been replaced is the case where a stale answer does the
+most damage. And **neighbours the other branches already found are dropped**,
+because fusion rewards agreement between branches and a branch echoing its own
+input would inflate the results that needed no help.
+
+It contributes nothing on a store where nobody has linked anything, which is
+normal rather than a fault -- so it says so, instead of returning an empty list
+that reads like a branch that ran and matched nothing:
+
+```
+graphWalk  ok  one-hop-neighbours
+fusion: bm25=3 semantic=3 recency=3 graph=0
+        graph: Nothing the other branches found is linked to anything.
+               Record links with `memory link`.
+```
+
+`graph` in the health report is the database engine; `graphWalk` is this branch.
+Two different things, and one name for both would hide a failure in either
+behind a healthy line about the other.
+
+### Picking before reading
+
+A full hit carries a 220-character snippet and costs about sixty tokens. `memory
+index` returns the same ranking with title, layer and source_ref only -- roughly
+fifteen -- so a budget that showed six entries now covers more than twenty:
+
+```bash
+memory index "retry"            # titles, to choose from
+memory search "retry"           # the ones worth reading, with snippets
+memory get <id>                 # one, in full
+```
+
+Both take `--offset`. `3 more of 9 not shown -- --offset 6` is now something you
+can act on rather than an apology.
+
+### .memignore
+
+A project's own answer to what should stay out. Gitignore syntax, at the
+repository root:
+
+```
+# regenerated, and nobody decides anything in them
+exports/
+scratch.md
+src/generated/
+*.bak
+!keep.bak
+```
+
+The built-in lists are guesses about repositories in general, and a guess about
+repositories in general is wrong about every particular one. This file never
+overrules a path named outright -- `memory ingest docs/exports` reads that
+directory whatever the rules say, because an instruction given now outranks a
+standing one written earlier.
+
 ## Multiple projects
 
 ```bash
@@ -433,6 +509,7 @@ feature.
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Byte cap on MCP tool output (default 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Token budget before Read/Grep/Glob (default 400) |
 | `MEMORY_LAYER_SESSION_TOKENS` | Token budget for session-start constraints (default 700) |
+| `MEMORY_LAYER_MAX_FILE_MB` | Runaway guard on one file (default 20) |
 
 On Windows, keep the model cache path short. It is nested deeply by default
 under pnpm, and a path over 260 characters fails as `File doesn't exist` — which

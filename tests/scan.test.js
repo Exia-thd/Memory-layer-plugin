@@ -317,8 +317,12 @@ test('--json output stays parseable when a scan is announced', async () => {
   }
 });
 
-test('a project with nothing conventional says so instead of failing obscurely', async () => {
-  const repo = makeRepo({ 'random.md': '# R\n\nxray yankee.\n' });
+test('a project with nothing to scan says so instead of failing obscurely', async () => {
+  // No conventional directory, no markdown, nothing that looks like a project
+  // one level down. Markdown at the root is always a target now, so a file like
+  // `random.md` would make this repository scannable -- which is the point of
+  // that rule and the reason this fixture cannot use one.
+  const repo = makeRepo({ 'random.txt': 'xray yankee.\n' });
   try {
     cli(repo, ['init', '--no-scan']);
     const result = cliRaw(repo, ['ingest']);

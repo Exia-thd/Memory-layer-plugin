@@ -92,6 +92,7 @@ function formatIgnored(ignored: IgnoredFile[], verbose: boolean): string {
       'excluded directory': 'name the directory to index it anyway',
       'secret or machine bookkeeping': 'deliberate: credentials must never reach an embedding',
       'not text': 'nothing to index; read it with an agent and record the conclusion',
+      '.memignore': 'your own rule; name the path to index it anyway',
     };
     const hint = wayOut[reason];
     if (hint) lines.push(`      ${hint}`);
@@ -107,8 +108,10 @@ const USAGE = `memory - project memory layer
   memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
                           [--verbose] [--quiet] [--max-file-size MB]  no paths: scan the project
   memory embed [--force]              embed nodes missing a current vector
-  memory search <query> [--limit N] [--layer L] [--json]
-  memory why <file|symbol> [--json]   decisions and constraints touching it
+  memory index <query> [--limit N] [--offset N] [--layer L] [--json]
+                          titles only, ~15 tokens each -- pick before you read
+  memory search <query> [--limit N] [--offset N] [--layer L] [--json]
+  memory why <file|symbol> [--limit N] [--offset N] [--json]   decisions touching it
   memory get <id> [--json]            one node plus its direct edges
   memory graph <id> [--depth N] [--edge TYPE] [--json]
   memory constraints [--limit N]      decisions in force, most important first
@@ -342,10 +345,37 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       if (!query) throw new Error('search needs a query');
       const result = await api.runSearch(query, {
         limit: numberFlag(args, 'limit'),
+        offset: numberFlag(args, 'offset'),
         layers: layerFlag(args) ? [layerFlag(args)!] : undefined,
         disableBm25: Boolean(args.flags['no-bm25']),
       });
       emit(args, result, () => formatSearch(result));
+      return 0;
+    }
+
+    case 'index': {
+      const query = args.positional.join(' ');
+      if (!query) throw new Error('index needs a query');
+      const result = await api.runIndex(query, {
+        limit: numberFlag(args, 'limit'),
+        offset: numberFlag(args, 'offset'),
+        layers: layerFlag(args) ? [layerFlag(args)!] : undefined,
+      });
+      emit(args, result, () => {
+        if (result.results.length === 0) return 'no results';
+        const lines = result.results.map(
+          (entry, i) =>
+            `${String(result.offset + i + 1).padStart(3)}. [${entry.layer}] ${entry.title}` +
+            `${entry.stale ? '  (stale)' : ''}
+     ${entry.sourceRef}`,
+        );
+        if (result.omitted > 0) {
+          lines.push(
+            `${result.omitted} more of ${result.total} -- --offset ${result.offset + result.results.length}`,
+          );
+        }
+        return lines.join('\n');
+      });
       return 0;
     }
 
@@ -354,6 +384,7 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
       if (!target) throw new Error('why needs a file path or symbol');
       const result = await api.runWhy(target, {
         limit: numberFlag(args, 'limit'),
+        offset: numberFlag(args, 'offset'),
         anchorOnly: Boolean(args.flags['anchor-only']),
       });
       emit(args, result, () => formatSearch(result));
@@ -633,12 +664,15 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
   }
 }
 
-function formatSearch(result: { results: { title: string; layer: string; sourceRef: string; snippet?: string; score: number; stale?: boolean }[]; fusion: { branches: Record<string, number>; degraded: string[]; reasons: Record<string, string> } }): string {
+function formatSearch(result: { results: { title: string; layer: string; sourceRef: string; snippet?: string; score: number; stale?: boolean }[]; fusion: { branches: Record<string, number>; degraded: string[]; reasons: Record<string, string> }; total?: number; omitted?: number; offset?: number }): string {
   const lines: string[] = [];
+  const from = result.offset ?? 0;
 
   for (const [index, hit] of result.results.entries()) {
     lines.push(
-      `${String(index + 1).padStart(2)}. [${hit.layer}] ${hit.title}${hit.stale ? '  (stale)' : ''}`,
+      // Numbered from the offset, so a second page does not restart at 1 and
+      // read as if it were the first.
+      `${String(from + index + 1).padStart(2)}. [${hit.layer}] ${hit.title}${hit.stale ? '  (stale)' : ''}`,
       `    ${hit.sourceRef}`,
     );
     if (hit.snippet) lines.push(`    ${hit.snippet}`);
@@ -646,6 +680,15 @@ function formatSearch(result: { results: { title: string; layer: string; sourceR
   }
 
   if (result.results.length === 0) lines.push('no results', '');
+
+  // The tail, and the exact way to see it. A count with no next step is a
+  // number the reader can do nothing with.
+  if ((result.omitted ?? 0) > 0) {
+    lines.push(
+      `${result.omitted} more of ${result.total} not shown -- --offset ${from + result.results.length}`,
+      '',
+    );
+  }
 
   // The fusion report is printed every time, not only when something went wrong:
   // whether a branch was missing changes how far these results should be trusted.

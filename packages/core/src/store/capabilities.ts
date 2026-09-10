@@ -42,6 +42,22 @@ export async function probeCapabilities(storeDir: string): Promise<Capabilities>
       status: 'available',
       reason: 'Ranks by importance and age; episodic memories fade, semantic ones do not.',
     },
+    // The fourth branch, and the one this project spent a while not having while
+    // calling itself GraphRAG. It contributes nothing on a store where nobody
+    // has linked anything, which is a normal state and not a fault -- so it
+    // reports the difference rather than returning an empty list that reads the
+    // same as a branch that ran and found nothing.
+    // `graph` above is the database engine; this is the retrieval branch that
+    // walks it. Two different things, and one name for both would hide a failure
+    // in either behind a healthy line about the other.
+    graphWalk: {
+      provider: 'one-hop-neighbours',
+      status: 'available',
+      reason:
+        'Walks one hop from what the other branches found, in either direction, and ranks a ' +
+        'neighbour by how many separate hits reach it. Contributes nothing until memories ' +
+        'are linked to each other.',
+    },
     // Which scripts survive tokenization. The first tokenizer was ASCII-only and
     // shredded every accented word without reporting anything.
     tokenizer: {

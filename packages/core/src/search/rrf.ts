@@ -59,7 +59,10 @@ export function fuse(branches: Branch[], k = RRF_K): FusionOutcome {
       reasons[branch.name] = branch.unavailableReason;
     } else if (branch.ranked.length === 0) {
       degraded.push(branch.name);
-      reasons[branch.name] = 'Branch ran and matched nothing.';
+      // A branch that knows why it found nothing has more to say than the
+      // generic line, and this is the case where the difference matters: "no
+      // memories are linked yet" is actionable and "matched nothing" is not.
+      reasons[branch.name] = branch.degradedReason ?? 'Branch ran and matched nothing.';
     } else if (branch.degradedReason) {
       degraded.push(branch.name);
       reasons[branch.name] = branch.degradedReason;

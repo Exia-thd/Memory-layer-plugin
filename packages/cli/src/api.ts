@@ -153,19 +153,78 @@ export async function runIngest(
 
 export async function runSearch(
   query: string,
-  options: { from?: string; limit?: number; layers?: Layer[]; disableBm25?: boolean } = {},
+  options: {
+    from?: string; limit?: number; offset?: number; layers?: Layer[]; disableBm25?: boolean;
+  } = {},
 ): Promise<SearchResult> {
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
     const provider = await embedder(store.dimensions);
     return await search(store, query, provider, {
       limit: options.limit ?? 10,
+      offset: options.offset,
       layers: options.layers,
       disableBm25: options.disableBm25,
     });
   } finally {
     await store.close();
   }
+}
+
+export interface IndexEntry {
+  id: string;
+  title: string;
+  layer: string;
+  sourceRef: string;
+  stale?: boolean;
+}
+
+export interface IndexResult {
+  results: IndexEntry[];
+  total: number;
+  omitted: number;
+  offset: number;
+  fusion: SearchResult['fusion'];
+}
+
+/**
+ * The same ranking, at a fifth of the cost per result.
+ *
+ * A full hit carries a 220-character snippet and runs about sixty tokens. On a
+ * four-hundred-token budget that buys six of them, which is why the hook could
+ * only ever show a handful and then apologise for the rest. Dropping the
+ * snippet leaves title, layer and source_ref -- roughly fifteen tokens, so the
+ * same budget covers twenty-six.
+ *
+ * That is the whole idea: decide what to read *from* a list you can see, rather
+ * than being handed the first few in full and told there were more. The
+ * snippets are still there; `memory search` and `memory get` fetch them for the
+ * entries worth opening.
+ */
+export async function runIndex(
+  query: string,
+  options: { from?: string; limit?: number; offset?: number; layers?: Layer[] } = {},
+): Promise<IndexResult> {
+  const found = await runSearch(query, {
+    from: options.from,
+    limit: options.limit ?? 30,
+    offset: options.offset,
+    layers: options.layers,
+  });
+
+  return {
+    results: found.results.map((hit) => ({
+      id: hit.id,
+      title: hit.title,
+      layer: hit.layer,
+      sourceRef: hit.sourceRef,
+      ...(hit.stale ? { stale: true } : {}),
+    })),
+    total: found.total ?? found.results.length,
+    omitted: found.omitted ?? 0,
+    offset: found.offset ?? 0,
+    fusion: found.fusion,
+  };
 }
 
 export async function runGet(id: string, options: { from?: string } = {}): Promise<{
@@ -190,7 +249,7 @@ export async function runGet(id: string, options: { from?: string } = {}): Promi
  */
 export async function runWhy(
   target: string,
-  options: { from?: string; limit?: number; anchorOnly?: boolean } = {},
+  options: { from?: string; limit?: number; offset?: number; anchorOnly?: boolean } = {},
 ): Promise<SearchResult & { anchoredTo: string }> {
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
@@ -216,7 +275,10 @@ export async function runWhy(
 
     // Then widen by wording, so a symbol name works as well as a path.
     const found = await search(store, target.replace(/[/_.\\-]+/g, ' '), provider, {
-      limit,
+      // No offset here. Paging is applied once, after the anchored hits merge
+      // in -- paging twice would skip a different set than the caller asked for
+      // on any file that carries recorded reasoning.
+      limit: limit + Math.max(0, options.offset ?? 0),
       layers: ['semantic', 'episodic', 'procedural'],
     });
 
@@ -238,12 +300,15 @@ export async function runWhy(
       }));
 
     const merged = [...lead, ...found.results.filter((hit) => !anchoredIds.has(hit.id))];
-    found.results = merged.slice(0, limit);
+    // Paged once, here, over the merged order.
+    const offset = Math.max(0, options.offset ?? 0);
+    found.results = merged.slice(offset, offset + limit);
+    found.offset = offset;
     // Anchored hits are found here, not by `search`, so the totals it returned
     // do not know about them. Recount after the merge or the number is a lie in
     // exactly the case that matters -- a file with a lot of recorded reasoning.
     found.total = Math.max(found.total ?? 0, merged.length);
-    found.omitted = Math.max(0, found.total - found.results.length);
+    found.omitted = Math.max(0, found.total - (offset + found.results.length));
 
     // Anchoring is a retrieval branch and is reported as one; otherwise a result
     // set answered entirely by anchors reads as "every branch found nothing".
