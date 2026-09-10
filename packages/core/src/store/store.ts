@@ -532,6 +532,52 @@ export class MemoryStore {
     return rows.map(rowToNode);
   }
 
+  /**
+   * Every declaration, with the memories recorded about each.
+   *
+   * One query rather than one per symbol: a map of a real repository is
+   * thousands of rows, and a round trip each would make looking at the graph
+   * cost more than building it.
+   */
+  async symbolMap(prefix?: string): Promise<Array<SymbolRow & { memories: Array<{ id: string; title: string; layer: string }> }>> {
+    const rows = await this.run(
+      `MATCH (s:Symbol)
+       ${prefix ? 'WHERE starts_with(s.file_path, $prefix)' : ''}
+       OPTIONAL MATCH (m:Memory)-[:ABOUT]->(s)
+       RETURN s.id AS id, s.name AS name, s.file_path AS filePath, s.kind AS kind,
+              s.start_line AS startLine, s.end_line AS endLine,
+              m.id AS memoryId, m.title AS memoryTitle, m.layer AS memoryLayer
+       ORDER BY s.file_path, s.start_line`,
+      prefix ? { prefix } : {},
+    );
+
+    const bySymbol = new Map<string, SymbolRow & { memories: Array<{ id: string; title: string; layer: string }> }>();
+    for (const raw of rows as Array<Record<string, unknown>>) {
+      const id = String(raw.id);
+      let entry = bySymbol.get(id);
+      if (!entry) {
+        entry = {
+          id,
+          name: String(raw.name),
+          filePath: String(raw.filePath),
+          kind: String(raw.kind),
+          startLine: Number(raw.startLine ?? 0),
+          endLine: Number(raw.endLine ?? 0),
+          memories: [],
+        };
+        bySymbol.set(id, entry);
+      }
+      if (raw.memoryId) {
+        entry.memories.push({
+          id: String(raw.memoryId),
+          title: String(raw.memoryTitle ?? ''),
+          layer: String(raw.memoryLayer ?? ''),
+        });
+      }
+    }
+    return [...bySymbol.values()];
+  }
+
   async symbolsInFile(filePath: string): Promise<SymbolRow[]> {
     const rows = await this.run(
       `MATCH (s:Symbol) WHERE s.file_path = $filePath

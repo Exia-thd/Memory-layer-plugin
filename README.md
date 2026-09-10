@@ -64,6 +64,7 @@ into the session; nothing needs to be configured by hand.
 | `memory graph <id> --depth N` | Walk the memory graph |
 | `memory constraints` | What this project has already settled |
 | `memory conflicts` | Contradictions a person needs to resolve |
+| `memory map [path] [--format mermaid]` | The code graph: files, declarations, and the memory about each |
 | `memory clusters` | Communities in the memory graph, with any stored summary |
 | `memory summarize <id> --body S` | Record a summary for a group, linked to its members |
 | `memory session start\|end` | Open or close a session, so writes record when they happened |

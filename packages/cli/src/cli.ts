@@ -28,6 +28,7 @@ const USAGE = `memory - project memory layer
   memory graph <id> [--depth N] [--edge TYPE] [--json]
   memory constraints [--limit N]      decisions in force, most important first
   memory changes [--scope S] [--base R]  what memory records about your changed files
+  memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
   memory session start <label> | end [--summary S] | (none)   open, close or show the session
   memory summarize <clusterId> --body S   record a summary for a group of memories
   memory conflicts [--json]           contradictions needing a person
@@ -228,6 +229,16 @@ async function main(argv: string[]): Promise<number> {
       }
       const open = api.currentSession(storeDirOrThrow());
       emit(args, { open }, () => (open ? `${open.label} (${open.id})` : 'no session open'));
+      return 0;
+    }
+
+    case 'map': {
+      const { runMap, formatMapTree, formatMapMermaid } = await import('./map.js');
+      const map = await runMap({ prefix: args.positional[0] });
+      const format = stringFlag(args, 'format') ?? 'tree';
+      emit(args, map, () =>
+        format === 'mermaid' ? formatMapMermaid(map) : formatMapTree(map),
+      );
       return 0;
     }
 

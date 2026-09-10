@@ -132,6 +132,20 @@ const TOOLS = [
     },
   },
   {
+    name: 'memory_map',
+    description:
+      'The code graph: which files declare what, and which memory is about each ' +
+      'declaration. Use to get oriented in an unfamiliar area before reading files ' +
+      'one by one. Pass a path prefix to narrow it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prefix: { type: 'string' },
+        format: { type: 'string', enum: ['json', 'mermaid'] },
+      },
+    },
+  },
+  {
     name: 'memory_clusters',
     description:
       'Groups of related memories, with the summary somebody wrote for each group ' +
@@ -335,6 +349,12 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
 
     case 'memory_constraints':
       return { constraints: await api.runConstraints({ limit: numeric(args.limit) }) };
+
+    case 'memory_map': {
+      const { runMap, formatMapMermaid } = await import('./map.js');
+      const map = await runMap({ prefix: args.prefix as string | undefined });
+      return args.format === 'mermaid' ? { mermaid: formatMapMermaid(map) } : map;
+    }
 
     case 'memory_clusters':
       return { clusters: await api.runClusters() };
