@@ -165,20 +165,30 @@ tự giữ bằng tay cũng sẽ bỏ sót đúng cái ngôn ngữ dự án bạ
 một repo thật, danh sách cũ bỏ sót **một phần năm** số file — phần lớn là script
 shell — và không nói một lời nào.
 
-Nên câu hỏi được lật ngược. Bốn danh sách ngắn nói cái gì **không** bị quét vào,
+Nên câu hỏi được lật ngược. Vài danh sách ngắn nói cái gì **không** bị quét vào,
 và cái nào cũng tự báo cáo:
 
 | Không nạp | Vì sao | Muốn nạp thì làm sao |
 |---|---|---|
 | `.png` `.pdf` `.docx` `.zip` … | Không phải văn bản, chẳng có gì để index | Để AI đọc phân tích rồi ghi lại kết luận |
 | `.env` `.pem` lockfile `*.min.js` | Bí mật và sổ sách của máy | Cố ý. Một credential không được phép chạm tới embedding |
-| `.svg` `.drawio` `.csv` `.html` `.xml` `.puml` | Tài liệu và bản xuất | `memory ingest docs/figma/tokens.svg` |
+| `.svg` `.drawio` `.puml` `.mermaid` | Bản xuất từ công cụ thiết kế / vẽ sơ đồ | `memory ingest docs/figma/tokens.svg` |
+| `.csv` `.tsv` `.rtf` | Tài liệu và dữ liệu bảng | `memory ingest docs/q1.csv` |
 | `node_modules` `dist` `build` `.git` … | Sinh tự động hoặc của bên thứ ba | `memory ingest docs/build` |
 
-Markdown **không bao giờ** nằm ở hàng thứ ba. Nó chính là định dạng mà người ta
-chuyển mọi thứ sang để đọc được, nên nó luôn được quét vào.
+Markdown **không bao giờ** nằm trong mấy hàng đó. Nó chính là định dạng mà người
+ta chuyển mọi thứ sang để đọc được, nên nó luôn được quét vào.
 
-Hàng thứ ba mới là hàng cần hiểu. Một bản xuất thiết kế hay một file PDF thường
+`.html`, `.xml`, `.ini`, `.cfg`, `.conf`, `.properties` cũng vậy. Một template,
+một layout Android, một file config Spring là **một phần của cách hệ thống chạy**,
+không phải tài liệu nói về nó — chúng là mã nguồn và được nạp như mã nguồn.
+
+Word, Excel, PDF là **nhị phân**, nên có chỉ định đích danh cũng chẳng có gì để
+index. `memory ingest report.pdf` trước đây báo `1 new, 1 embedded` rồi nhét
+byte thô vào kho dưới dạng vector; giờ nó **từ chối** và chỉ sang `memory write`.
+Gọi đích danh thắng được **chính sách**, không thắng được **vật lý**.
+
+Hai hàng giữa mới là phần cần hiểu. Một bản xuất thiết kế hay một file PDF thường
 không đáng lưu nguyên: thứ đáng giữ là **kết luận** ai đó rút ra từ nó, ghi bằng
 `memory write` kèm `--source-ref` trỏ ngược về file. Vài nghìn mảnh toạ độ đường
 vẽ không phải là kết luận. Nhưng đôi khi chính file đó là tài liệu tham chiếu, và
@@ -387,6 +397,38 @@ khác biệt giữa 3,3 giây và 0,6 giây trên **mỗi** file agent đụng v
 
 ---
 
+### Hook tiêu bao nhiêu
+
+Trước đây giới hạn là **số mục** — ba. Ba mục có thể là 60 token hoặc 6 000
+token tuỳ người ta viết dài hay ngắn, nên cùng một con số mà chi phí lệch trăm
+lần — và nó **không bao giờ nói đã bỏ lại gì**. Chín ký ức về một file, hiển thị
+ba, sáu cái kia biến mất không dấu vết — ngay trong đường chạy nhiều nhất, tức
+là trên mọi Read, Grep và Glob.
+
+Giờ cả hai hook tiêu theo **ngân sách token** và báo cáo phần còn lại:
+
+```
+Project memory has 9 entries about src/charge.js, showing 3:
+- [semantic] Chốt ở hai lần, không backoff (docs/adr-001.md#L12-L20)
+- [decision] ...
+- [episodic] ...
+6 more not shown: memory_why src/charge.js
+```
+
+| Biến | Mặc định | Áp cho |
+|---|---|---|
+| `MEMORY_LAYER_HOOK_TOKENS` | 400 | Trước Read, Grep, Glob |
+| `MEMORY_LAYER_SESSION_TOKENS` | 700 | Ràng buộc lúc mở phiên |
+
+Hai tính chất quan trọng hơn con số. **Mục đầu tiên luôn được giữ** dù dài đến
+đâu — vì một ngân sách có thể trả về rỗng sẽ biến một ký ức quá khổ thành câu
+"file này không có ghi chép nào", tức là ngược hẳn sự thật. Và **file không có
+gì ghi thì hook vẫn im hoàn toàn**, nên chi phí luôn tỉ lệ với mức hữu ích.
+
+`memory search` và `memory why` giờ trả thêm `total` và `omitted` trong `--json`
+vì cùng lý do đó. `memory changes` đã báo số bỏ sót từ ngày nó được viết; đúng
+hai lệnh mà hook gọi thì lại không.
+
 ## Nhiều dự án
 
 ```bash
@@ -409,6 +451,8 @@ một khách hàng xuất hiện trong repo khác là một sự cố, không ph
 | `MEMORY_LAYER_EMBEDDINGS=hash` | Bỏ qua model; chỉ dùng bản dự phòng từ vựng |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Tự ghi lệnh thất bại |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Trần byte cho output tool MCP (mặc định 24000) |
+| `MEMORY_LAYER_HOOK_TOKENS` | Ngân sách token trước Read/Grep/Glob (mặc định 400) |
+| `MEMORY_LAYER_SESSION_TOKENS` | Ngân sách token cho ràng buộc đầu phiên (mặc định 700) |
 
 Trên Windows, giữ đường dẫn cache model **ngắn**. Mặc định nó nằm sâu dưới pnpm,
 và đường dẫn quá 260 ký tự sẽ hỏng với thông báo `File doesn't exist` — đọc y hệt

@@ -137,20 +137,30 @@ and any hand-kept subset silently omits whichever language your project uses.
 Measured against a real repository, the previous list missed a fifth of its
 files -- mostly shell scripts -- and said nothing about it.
 
-So the question is inverted. Four short lists say what is *not* swept up, and
+So the question is inverted. A few short lists say what is *not* swept up, and
 every one of them reports itself:
 
 | Not indexed | Why | How to get it in |
 |---|---|---|
 | `.png` `.pdf` `.docx` `.zip` … | Not text; there is nothing to index | Read it with an agent and record the conclusion |
 | `.env` `.pem` lockfiles `*.min.js` | Credentials and machine bookkeeping | Deliberate. A credential must not reach an embedding |
-| `.svg` `.drawio` `.csv` `.html` `.xml` `.puml` | Documents and exports | `memory ingest docs/figma/tokens.svg` |
+| `.svg` `.drawio` `.puml` `.mermaid` | Exports from a design or diagram tool | `memory ingest docs/figma/tokens.svg` |
+| `.csv` `.tsv` `.rtf` | Documents and tabular data | `memory ingest docs/q1.csv` |
 | `node_modules` `dist` `build` `.git` … | Generated or vendored | `memory ingest docs/build` |
 
-Markdown is never in the third row. It is the format things get converted into
+Markdown is never in these rows. It is the format things get converted into
 precisely so they can be read, so it is always swept up.
 
-The third row is the one to understand. A design export or a PDF is usually not
+Neither is `.html`, `.xml`, `.ini`, `.cfg`, `.conf` or `.properties`. A
+template, an Android layout and a Spring config are part of how the thing
+works, not documents about it -- they are source, and they are indexed like it.
+
+Word, Excel and PDF are binary, so there is nothing to index even when you name
+one. `memory ingest report.pdf` used to report `1 new, 1 embedded` and store the
+raw bytes as a vector; it now refuses and points at `memory write`. Naming a
+file overrules policy, not physics.
+
+The middle rows are the ones to understand. A design export or a PDF is usually not
 worth storing whole: what is worth keeping is the conclusion somebody drew from
 it, written with `memory write` and a `--source-ref` pointing back at the file.
 A few thousand chunks of path coordinates are not that. But sometimes the file
@@ -365,6 +375,39 @@ touches.
 
 ---
 
+### What the hooks spend
+
+The limit used to be a count of entries -- three. Three entries is 60 tokens or
+6,000 depending on how much somebody wrote, so the same number bought a
+hundredfold difference in cost, and it never said what it left out. Nine
+memories about a file, three shown, six gone without a mark -- in the path that
+runs on every Read, Grep and Glob.
+
+Both hooks now spend a token budget and report the tail:
+
+```
+Project memory has 9 entries about src/charge.js, showing 3:
+- [semantic] Retry twice, not exponential backoff (docs/adr-001.md#L12-L20)
+- [decision] ...
+- [episodic] ...
+6 more not shown: memory_why src/charge.js
+```
+
+| Variable | Default | Covers |
+|---|---|---|
+| `MEMORY_LAYER_HOOK_TOKENS` | 400 | Before Read, Grep and Glob |
+| `MEMORY_LAYER_SESSION_TOKENS` | 700 | Constraints at session start |
+
+Two properties matter more than the numbers. The first entry is always kept
+however long it is, because a budget that can return nothing turns one oversized
+memory into "this file has no recorded reasoning" -- the opposite of the truth.
+And a file with nothing recorded still produces no output at all, so the cost
+stays proportional to how useful the answer was.
+
+`memory search` and `memory why` carry `total` and `omitted` in `--json` for the
+same reason. `memory changes` had reported an omitted count since it was
+written; the two commands the hooks actually call did not.
+
 ## Multiple projects
 
 ```bash
@@ -388,6 +431,8 @@ feature.
 | `MEMORY_LAYER_EMBEDDINGS=hash` | Skip the model; lexical fallback only |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Record failed commands automatically |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Byte cap on MCP tool output (default 24000) |
+| `MEMORY_LAYER_HOOK_TOKENS` | Token budget before Read/Grep/Glob (default 400) |
+| `MEMORY_LAYER_SESSION_TOKENS` | Token budget for session-start constraints (default 700) |
 
 On Windows, keep the model cache path short. It is nested deeply by default
 under pnpm, and a path over 260 characters fails as `File doesn't exist` — which

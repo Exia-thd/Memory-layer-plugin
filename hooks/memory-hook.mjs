@@ -22,6 +22,46 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, '..', 'packages', 'cli', 'dist', 'cli.js');
 const BUDGET_MS = 7000;
 
+/**
+ * How much of the context window a hook may spend, in tokens.
+ *
+ * The limit used to be a count of entries -- three. Three entries is 60 tokens
+ * or 6,000 depending on how much somebody wrote, so the same number bought a
+ * hundredfold difference in cost, and the knob was measuring the wrong thing.
+ *
+ * A budget in tokens has the property a count does not: what fits is decided by
+ * what is actually there. Small entries all get through; one long one does not
+ * crowd out the rest silently, because whatever did not fit is counted and said.
+ */
+const TOKEN_BUDGET = Number(process.env.MEMORY_LAYER_HOOK_TOKENS ?? 400);
+const SESSION_TOKEN_BUDGET = Number(process.env.MEMORY_LAYER_SESSION_TOKENS ?? 700);
+
+/** Four characters per token: rough, and on the safe side for prose and code. */
+function tokensOf(text) {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Fills a budget in order and reports what did not fit.
+ *
+ * Truncating is fine. Truncating without saying so is how a reader concludes
+ * that three entries is all there was -- the same failure as a walk that skips
+ * nine files under a line reading like success.
+ */
+function fitToBudget(lines, budget) {
+  const kept = [];
+  let spent = 0;
+  for (const line of lines) {
+    const cost = tokensOf(line);
+    // Always take the first, however long: a budget that can return nothing
+    // turns one oversized entry into silence.
+    if (kept.length > 0 && spent + cost > budget) break;
+    kept.push(line);
+    spent += cost;
+  }
+  return { kept, dropped: lines.length - kept.length, spent };
+}
+
 const mode = process.argv[2];
 
 try {
@@ -56,13 +96,22 @@ exitQuiet();
 /** Constraints in force and unresolved contradictions, added to the session context. */
 async function sessionStart(cwd) {
   const conflicts = await runCli(cwd, ['conflicts', '--json']);
-  const constraints = await runCli(cwd, ['constraints', '--limit', '5', '--json']);
+  const constraints = await runCli(cwd, ['constraints', '--limit', '20', '--json']);
 
   const lines = [];
   const found = constraints ?? [];
   if (found.length > 0) {
-    lines.push('Active constraints recorded for this project:');
-    for (const node of found) lines.push(`- ${node.title} (${node.sourceRef})`);
+    // Constraints are ordered by importance, so a budget keeps the ones that
+    // matter and reports the tail rather than choosing a number in advance.
+    const entries = found.map((node) => `- ${node.title} (${node.sourceRef})`);
+    const { kept, dropped } = fitToBudget(entries, SESSION_TOKEN_BUDGET);
+    lines.push(
+      dropped > 0
+        ? `Active constraints recorded for this project (${kept.length} of ${found.length}):`
+        : 'Active constraints recorded for this project:',
+    );
+    lines.push(...kept);
+    if (dropped > 0) lines.push(`${dropped} more: memory_constraints`);
   }
 
   const unresolved = conflicts ?? [];
@@ -97,14 +146,29 @@ async function preTool(cwd, payload) {
   // --anchor-only: this hook fires on every Read, Grep and Glob, and only needs
   // the provenance anchor. Loading the embedding model here cost 2.5s of the
   // 10s budget on every file the agent touched.
-  const why = await runCli(cwd, ['why', target, '--limit', '3', '--anchor-only', '--json']);
+  // Ask for more than will fit and let the budget decide, rather than letting a
+  // count decide and never learning what it cost.
+  const why = await runCli(cwd, ['why', target, '--limit', '10', '--anchor-only', '--json']);
   const hits = why?.results ?? [];
   if (hits.length === 0) return;
 
-  const lines = [`Project memory has ${hits.length} entr${hits.length === 1 ? 'y' : 'ies'} about ${target}:`];
-  for (const hit of hits) {
-    lines.push(`- [${hit.layer}] ${hit.title} (${hit.sourceRef})${hit.stale ? ' (recorded a while ago)' : ''}`);
-  }
+  const entries = hits.map(
+    (hit) => `- [${hit.layer}] ${hit.title} (${hit.sourceRef})${hit.stale ? ' (recorded a while ago)' : ''}`,
+  );
+  const { kept, dropped } = fitToBudget(entries, TOKEN_BUDGET);
+
+  // `omitted` is what the query itself left behind; `dropped` is what the budget
+  // did. Both are things the reader has not seen, so both are counted.
+  const unseen = dropped + (why?.omitted ?? 0);
+  const total = (why?.total ?? hits.length) + 0;
+
+  const lines = [
+    unseen > 0
+      ? `Project memory has ${total} entries about ${target}, showing ${kept.length}:`
+      : `Project memory has ${kept.length} entr${kept.length === 1 ? 'y' : 'ies'} about ${target}:`,
+    ...kept,
+  ];
+  if (unseen > 0) lines.push(`${unseen} more not shown: memory_why ${target}`);
   lines.push('Call memory_why for the full reasoning before changing this.');
 
   emit({

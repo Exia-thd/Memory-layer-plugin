@@ -58,9 +58,31 @@ export interface IgnoredFile {
   detail: string;
 }
 
+/**
+ * Directories a walk never enters on its own.
+ *
+ * Everything here is either a dependency someone else wrote or the output of a
+ * build, and indexing either one buries the project's own code under code
+ * nobody in this repository is responsible for. Anything beginning with a dot
+ * is already skipped by a separate rule, which covers `.next`, `.turbo`,
+ * `.nuxt`, `.gradle`, `.terraform`, `.pytest_cache` and their kin -- so what is
+ * listed here is only the build outputs that do not announce themselves that
+ * way.
+ *
+ * `bin` is deliberately absent: plenty of repositories keep real, hand-written
+ * scripts in it, and skipping those would lose source rather than output.
+ *
+ * Being wrong here is recoverable and visible: each skipped directory is
+ * reported with the reason, and naming it outright indexes it anyway.
+ */
 const SKIP_DIRECTORIES = new Set([
-  'node_modules', '.git', 'dist', 'build', 'target', '.venv', 'venv',
-  '__pycache__', '.next', '.cache', 'coverage', '.memory',
+  // Dependencies someone else wrote.
+  'node_modules', 'bower_components', 'jspm_packages', 'vendor', 'Pods',
+  'site-packages', 'deps', '.venv', 'venv', '.git', '.memory',
+  // Build and test output.
+  'dist', 'build', '_build', 'target', 'out', 'obj', 'Debug', 'Release',
+  'cmake-build-debug', 'cmake-build-release',
+  '__pycache__', '.next', '.cache', 'coverage', 'htmlcov',
 ]);
 
 /**
@@ -148,10 +170,20 @@ const NEVER_AUTO_NAMES = new Set([
  * converted into precisely so that they can be read.
  */
 const NAMED_ONLY_EXTENSIONS = new Set([
+  // Exports from a design or diagram tool: mostly coordinates, and the useful
+  // part is the conclusion somebody drew from looking at one.
   '.svg', '.drawio', '.puml', '.plantuml', '.mermaid', '.mmd', '.excalidraw',
-  '.csv', '.tsv', '.html', '.htm', '.xml', '.rtf', '.tex',
-  '.ini', '.cfg', '.conf', '.properties', '.plist',
+  // Documents and tabular data. The binary members of this family -- .docx,
+  // .xlsx, .pdf -- cannot be indexed at all and are refused outright; these are
+  // the ones that happen to be text, and they get the same treatment for the
+  // same reason.
+  '.csv', '.tsv', '.rtf',
 ]);
+
+// Deliberately NOT here: .html, .htm, .xml, .ini, .cfg, .conf, .properties.
+// A template, an Android layout, a Spring config are source -- they are part of
+// how the thing works, not documents about it.
+
 
 /**
  * Whether the bytes are text.
@@ -523,9 +555,23 @@ function collectFiles(
   const stat = fs.statSync(resolved);
   // A path named outright is a decision already made: honour it whatever it is
   // called and whatever it weighs. `memory ingest docs/build` is the way past
-  // the block list, and `memory ingest docs/figma/export.svg` past the size
-  // limit -- a default the user can always overrule for one file.
-  if (stat.isFile()) return [resolved];
+  // the block list, and `memory ingest docs/figma/export.svg` past the
+  // named-only rule -- a default the user can always overrule for one file.
+  //
+  // But naming a file overrules policy, not physics. `memory ingest report.pdf`
+  // used to report `1 new, 1 embedded` and put the raw bytes in the store, as a
+  // vector, exit 0 -- a success message for a node nobody can ever read. What
+  // to index is the user's call; whether there is anything there to index is
+  // not a matter of opinion.
+  if (stat.isFile()) {
+    if (!looksLikeText(resolved)) {
+      throw new Error(
+        `${target} is not a text file, so there is nothing to index. ` +
+          'Read it with an agent and record the conclusion with `memory write`.',
+      );
+    }
+    return [resolved];
+  }
 
   const found: string[] = [];
   const walk = (dir: string) => {

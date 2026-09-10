@@ -132,7 +132,10 @@ export async function search(
     });
   }
 
-  return { results, fusion: report };
+  // What the limit cut. `hits` is what fusion actually found, so the difference
+  // is the answer to "was there more" -- a question the caller could not ask
+  // before, and therefore never did.
+  return { results, fusion: report, total: hits.length, omitted: Math.max(0, hits.length - results.length) };
 }
 
 async function keywordHits(

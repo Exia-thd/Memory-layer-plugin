@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { writeFileAtomic } from '../util/atomic.js';
 import path from 'node:path';
 import { canonicalizePath, globalDir, registryPath, storeDirFor } from '../util/paths.js';
 
@@ -29,9 +30,7 @@ export function readRegistry(): RegistryEntry[] {
 
 function writeRegistry(entries: RegistryEntry[]): void {
   fs.mkdirSync(globalDir(), { recursive: true });
-  const tmp = `${registryPath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(entries, null, 2));
-  fs.renameSync(tmp, registryPath());
+  writeFileAtomic(registryPath(), JSON.stringify(entries, null, 2));
 }
 
 /** Registers a project, or updates the entry already holding that path. */

@@ -237,7 +237,13 @@ export async function runWhy(
         ranks: { anchor: 1 },
       }));
 
-    found.results = [...lead, ...found.results.filter((hit) => !anchoredIds.has(hit.id))].slice(0, limit);
+    const merged = [...lead, ...found.results.filter((hit) => !anchoredIds.has(hit.id))];
+    found.results = merged.slice(0, limit);
+    // Anchored hits are found here, not by `search`, so the totals it returned
+    // do not know about them. Recount after the merge or the number is a lie in
+    // exactly the case that matters -- a file with a lot of recorded reasoning.
+    found.total = Math.max(found.total ?? 0, merged.length);
+    found.omitted = Math.max(0, found.total - found.results.length);
 
     // Anchoring is a retrieval branch and is reported as one; otherwise a result
     // set answered entirely by anchors reads as "every branch found nothing".

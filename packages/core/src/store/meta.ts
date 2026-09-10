@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { writeFileAtomic } from '../util/atomic.js';
 import path from 'node:path';
 import type { Capabilities } from '../types.js';
 import { SCHEMA_VERSION } from './schema.js';
@@ -48,9 +49,7 @@ export function readMeta(dir: string): StoreMeta {
 export function writeMeta(dir: string, meta: StoreMeta): void {
   fs.mkdirSync(dir, { recursive: true });
   // Write-then-rename: a torn meta.json would make the whole store unreadable.
-  const tmp = `${metaPath(dir)}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2));
-  fs.renameSync(tmp, metaPath(dir));
+  writeFileAtomic(metaPath(dir), JSON.stringify(meta, null, 2));
 }
 
 export function updateMeta(dir: string, patch: Partial<StoreMeta>): StoreMeta {

@@ -117,6 +117,17 @@ export interface SearchHit {
 export interface SearchResult {
   results: SearchHit[];
   fusion: FusionReport;
+  /**
+   * How many hits there were before the limit, and how many did not survive it.
+   *
+   * A limit answers "how much", never "how much was there" -- so a caller shown
+   * three of nine had no way to know the six existed. `memory changes` already
+   * reported an `omitted` count for exactly this reason; search and why did not,
+   * and they are what the hooks call on every file the agent touches. Anything
+   * dropped has to leave a mark, or the caller believes it saw everything.
+   */
+  total?: number;
+  omitted?: number;
 }
 
 export interface StoreStats {

@@ -348,3 +348,89 @@ test('--quiet prints nothing, because a post-commit hook should not chatter', as
     repo.cleanup();
   }
 });
+
+test('html, xml and config are source, not documents', async () => {
+  const repo = makeRepo({
+    // A template, an Android layout and a Spring config are part of how the
+    // thing works, not documents about it. Making the user name them one by one
+    // would leave the front half of a web project out of the store.
+    'src/page.html': '<html><body>alphahtml</body></html>\n',
+    'src/layout.xml': '<LinearLayout><Text>bravoxml</Text></LinearLayout>\n',
+    'src/app.conf': 'timeout = charlieconf\n',
+    'src/setup.ini': '[main]\nkey = deltaini\n',
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    const out = cli(repo, ['ingest', 'src']);
+    assert.doesNotMatch(out, /not indexed unless named/, `source treated as a document: ${out}`);
+
+    for (const [term, file] of [
+      ['alphahtml', /page\.html/], ['bravoxml', /layout\.xml/],
+      ['charlieconf', /app\.conf/], ['deltaini', /setup\.ini/],
+    ]) {
+      assert.match(cli(repo, ['search', term]), file, `${term} not indexed`);
+    }
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('naming a binary file is refused rather than reported as success', async () => {
+  const repo = makeRepo({ 'docs/note.md': '# N\n\nechozulu.\n' });
+  try {
+    fs.writeFileSync(
+      path.join(repo.dir, 'docs/report.pdf'),
+      Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0xff, 0xfe, 0x00]),
+    );
+    cli(repo, ['init', '--no-scan']);
+
+    // Naming a file overrules policy, not physics. This used to report
+    // `1 new, 1 embedded` and store the raw bytes as a vector, exit 0 -- a
+    // success message for a node nobody could ever read.
+    const result = cliRaw(repo, ['ingest', 'docs/report.pdf']);
+    assert.equal(result.status, 1, `a binary was accepted: ${result.stdout}`);
+    assert.match(result.stderr, /not a text file/, result.stderr);
+    assert.match(result.stderr, /memory write/, 'no alternative offered');
+
+    const doctor = cli(repo, ['doctor']);
+    assert.match(doctor, /store\s+\w+\s+0 nodes/, `the store was polluted: ${doctor}`);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('build output and vendored dependencies stay out of the graph', async () => {
+  const repo = makeRepo({
+    'src/real.js': 'export function realCode() { return 1; }\n',
+    'src/bin/deploy.sh': 'echo binscriptzulu\n',
+    // What `npm build`, `mvn package`, `dotnet build` and friends leave behind,
+    // placed where a walk of `src` will actually meet them. Naming a directory
+    // outright still wins, so testing this by naming `dist` would test nothing.
+    'src/dist/bundle.js': 'export function distZulu() {}\n',
+    'src/out/app.js': 'export function outZulu() {}\n',
+    'src/obj/gen.cs': 'class ObjZulu {}\n',
+    'src/build/gen.js': 'export function buildZulu() {}\n',
+    'src/target/T.java': 'class TargetZulu {}\n',
+    'src/vendor/v.php': '<?php function vendorZulu() {}\n',
+    'src/node_modules/pkg/i.js': 'export function nmZulu() {}\n',
+    'src/.next/static/n.js': 'export function nextZulu() {}\n',
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src']);
+
+    for (const term of [
+      'distZulu', 'outZulu', 'ObjZulu', 'buildZulu',
+      'TargetZulu', 'vendorZulu', 'nmZulu', 'nextZulu',
+    ]) {
+      assert.doesNotMatch(cli(repo, ['search', term]), /#L/, `${term} was indexed`);
+    }
+
+    assert.match(cli(repo, ['search', 'realCode']), /real\.js/, 'real source was lost');
+    // `bin` holds hand-written scripts often enough that skipping it would lose
+    // source rather than output.
+    assert.match(cli(repo, ['search', 'binscriptzulu']), /deploy\.sh/, 'bin/ was skipped');
+  } finally {
+    repo.cleanup();
+  }
+});
