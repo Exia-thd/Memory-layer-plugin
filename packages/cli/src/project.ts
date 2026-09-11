@@ -219,14 +219,14 @@ export async function openStore(options: { readOnly?: boolean; from?: string } =
   const from = options.from ?? process.cwd();
   const dir = locateStore(from);
   if (!dir) {
-    throw new Error(`No memory store found at or above ${from}. Run \`memory init\` first.`);
+    throw new Error(`No memory store found at or above ${from}. Run \`dai-memory init\` first.`);
   }
   return new MemoryStore(dir, { readOnly: options.readOnly ?? false });
 }
 
 export function storeDirOrThrow(from: string = process.cwd()): string {
   const dir = locateStore(from);
-  if (!dir) throw new Error(`No memory store found at or above ${from}. Run \`memory init\` first.`);
+  if (!dir) throw new Error(`No memory store found at or above ${from}. Run \`dai-memory init\` first.`);
   return dir;
 }
 

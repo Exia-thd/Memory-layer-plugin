@@ -13,7 +13,7 @@ import { log } from '../util/log.js';
  * session appends to its own file and a later merge folds them in.
  *
  * The trade-off is real and is stated plainly: a write is not visible to search
- * until it merges. `memory doctor` reports pending entries so the lag is never
+ * until it merges. `dai-memory doctor` reports pending entries so the lag is never
  * invisible.
  */
 export interface JournalEntry {

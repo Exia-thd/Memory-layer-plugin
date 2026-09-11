@@ -63,7 +63,7 @@ export async function runMap(options: { from?: string; prefix?: string } = {}): 
 /** A tree, for reading. */
 export function formatMapTree(map: CodeMap): string {
   if (map.files.length === 0) {
-    return 'No declarations recorded. Run `memory ingest` over source files first.';
+    return 'No declarations recorded. Run `dai-memory ingest` over source files first.';
   }
 
   const lines: string[] = [];

@@ -127,6 +127,7 @@ const USAGE = `dai-memory - project memory layer
   dai-memory write --layer L --title T --body B --source-ref R [--link ID:TYPE]
   dai-memory link <from> <to> <TYPE> [--weight W]
   dai-memory merge                        fold queued session writes into the store
+  dai-memory eval [--top N] [--json]      score retrieval against .memory-eval.json
   dai-memory doctor [--json]              what is actually working
   dai-memory list                         registered projects
   dai-memory forget [path]                drop a project from the registry
@@ -322,6 +323,20 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
           ? '\n' + report.dense
               .map((d) => `   ${d.path}: ${d.chunks} chunks from ${d.kb} KB -- unusually dense`)
               .join('\n')
+          : '') +
+        // Offered, not recorded. Which of these is a decision worth keeping is
+        // the judgement this layer exists to capture, and a chunk promoted
+        // automatically would be a decision nobody made.
+        (report.candidates.length > 0
+          ? `\n\n${report.candidates.length} chunk(s) read like recorded reasoning:\n` +
+            report.candidates
+              .slice(0, 8)
+              .map((c) => `   ${c.sourceRef}\n      "${c.excerpt}"`)
+              .join('\n') +
+            (report.candidates.length > 8
+              ? `\n   ... and ${report.candidates.length - 8} more`
+              : '') +
+            '\n   worth a decision? dai-memory write --layer semantic --source-ref <ref> ...'
           : '') +
         formatIgnored(report.ignored, Boolean(args.flags.verbose)) +
         (report.redactions.length > 0
@@ -623,6 +638,37 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         `${built.file}\n${built.nodes} nodes${built.truncated ? ' (trimmed -- narrow it with a path)' : ''}` +
         '\nA snapshot: re-run after changing the store. Open it in a browser.',
       );
+      return 0;
+    }
+
+    case 'eval': {
+      const report = await api.runEval({ topK: numberFlag(args, 'top') });
+      emit(args, report, () => {
+        const lines = [`${report.questions} questions, recall@${report.topK}`, ''];
+        for (const row of report.rows) {
+          const pct = ((row.found / row.asked) * 100).toFixed(0);
+          const width = ((row.high - row.low) * 100).toFixed(0);
+          lines.push(
+            `  ${row.label.padEnd(18)} ${String(row.found).padStart(3)}/${row.asked} (${pct}%)` +
+            `  95% CI ${(row.low * 100).toFixed(0)}-${(row.high * 100).toFixed(0)}%, ${width} wide` +
+            `   false ${row.rejected}/${row.asked}`,
+          );
+        }
+        if (report.missed.length > 0) {
+          lines.push('', `${report.missed.length} unanswered:`);
+          for (const miss of report.missed.slice(0, 10)) {
+            lines.push(`  ${miss.id}  ${miss.ask}`);
+            lines.push(`       got: ${miss.got.join(', ') || '(nothing)'}`);
+          }
+        }
+        lines.push(
+          '',
+          'A branch that changes nothing when removed contributed nothing to these',
+          'questions. Read the interval before the percentage: configurations whose',
+          'intervals overlap have not been shown to differ.',
+        );
+        return lines.join('\n');
+      });
       return 0;
     }
 

@@ -44,7 +44,7 @@ export async function doctor(
       detail:
         `${stats.nodes.toLocaleString()} nodes / ${stats.edges.toLocaleString()} edges / ` +
         `${(bytes / 1e6).toFixed(1)} MB` +
-        (stats.nodes === 0 ? ' -- store is empty; run `memory ingest`' : ''),
+        (stats.nodes === 0 ? ' -- store is empty; run `dai-memory ingest`' : ''),
     });
   } catch (err) {
     checks.push({
@@ -124,7 +124,7 @@ export async function doctor(
       detail:
         index.docCount === 0 && stats.nodes > 0
           ? `no postings for ${stats.nodes} nodes -- keyword search falls back to an ` +
-            'in-memory rebuild; run `memory ingest --force`'
+            'in-memory rebuild; run `dai-memory ingest --force`'
           : behind > 0
             ? `${index.docCount}/${stats.nodes} nodes indexed; ${behind} are invisible to keyword search`
             : `${index.docCount.toLocaleString()} nodes indexed`,
@@ -144,7 +144,7 @@ export async function doctor(
             ? `postings built with v${TOKENIZER_VERSION}`
             : `postings built with ${builtWith === undefined ? 'an unrecorded tokenizer' : `v${builtWith}`}, ` +
               `this build queries with v${TOKENIZER_VERSION} -- keyword results are ` +
-              'partial until `memory ingest --force` rebuilds them',
+              'partial until `dai-memory ingest --force` rebuilds them',
     });
 
     const orphans = await store.orphanedMemories();
@@ -176,7 +176,7 @@ export async function doctor(
         vanished.length > 0
           ? `${vanished.length} file(s) in the index no longer exist on disk ` +
             `(${vanished.slice(0, 3).join(', ')}${vanished.length > 3 ? ', ...' : ''}) -- ` +
-            'their memories still answer queries; run `memory ingest` to reclaim them'
+            'their memories still answer queries; run `dai-memory ingest` to reclaim them'
           : `${tracked.length} indexed file(s) all present on disk`,
     });
   }
@@ -187,7 +187,7 @@ export async function doctor(
     status: pending > 0 ? 'warn' : 'ok',
     detail:
       pending > 0
-        ? `${pending} writes queued and not yet searchable -- run \`memory merge\``
+        ? `${pending} writes queued and not yet searchable -- run \`dai-memory merge\``
         : 'no queued writes',
   });
 

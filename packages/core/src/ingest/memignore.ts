@@ -18,7 +18,7 @@ import path from 'node:path';
  * supported and are matched literally, which is worth knowing before writing
  * one.
  *
- * It never overrules a path named outright. `memory ingest docs/figma` reads
+ * It never overrules a path named outright. `dai-memory ingest docs/figma` reads
  * that directory whatever this file says -- an explicit instruction from the
  * person running the command outranks a standing one they wrote earlier.
  */

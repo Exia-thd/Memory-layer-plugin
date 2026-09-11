@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { TOKENIZER_VERSION } from '../util/tokenize.js';
+import { TOKENIZER_VERSION, fold } from '../util/tokenize.js';
 import path from 'node:path';
 import type { MemoryStore } from '../store/store.js';
 import type { Layer, MemoryNode } from '../types.js';
@@ -41,7 +41,16 @@ export interface IngestReport {
   ignored: IgnoredFile[];
   /** Files that produced far more chunks than their size suggests. */
   dense: { path: string; chunks: number; kb: number }[];
+  /** Chunks that read like a decision somebody already reasoned through. */
+  candidates: DecisionCandidate[];
   redactions: { rule: string; count: number }[];
+}
+
+export interface DecisionCandidate {
+  sourceRef: string;
+  title: string;
+  /** The phrase that made it look like a decision, for a reader to judge. */
+  excerpt: string;
 }
 
 export type IgnoreReason =
@@ -114,6 +123,65 @@ export const DEFAULT_MAX_FILE_BYTES = 20_000_000;
 const DENSE_CHUNK_COUNT = 500;
 
 /**
+ * What a decision looks like in prose, as opposed to a description.
+ *
+ * The store fills with derived chunks -- 738 of them against 4 decisions on
+ * this repository, so better than 99% of it is material nobody judged. The
+ * valuable part is the handful of places where somebody weighed one option
+ * against another and wrote down why, and those are invisible among the rest.
+ *
+ * The test is deliberately two-sided, because the project's own guidance draws
+ * exactly this line: "Retry twice" is a setting; "retry twice, chosen over
+ * backoff because the payment gateway counts each attempt" is a decision. A
+ * text that only asserts a choice is configuration. A text that also names what
+ * it rejected is reasoning, and reasoning is the thing that cannot be recovered
+ * from the code later.
+ *
+ * Requiring both halves keeps this quiet. Matching "because" alone would fire
+ * on most comments in a well-commented file and train the reader to skip the
+ * whole report -- the same failure as a linter nobody reads.
+ */
+const CHOSE = new RegExp(
+  [
+    '\\b(chose|chosen|choosing|decided|decision|deliberate|deliberately|intentionally)\\b',
+    '\\b(settled on|went with|on purpose)\\b',
+    // Written unaccented, and the text is folded to meet it. Vietnamese gets
+    // typed without tone marks far more often than with them, so a rule that
+    // knew only the accented spelling would miss most of what it exists for --
+    // the same reason the tokenizer folds, and the same trick.
+    'quyet dinh|chot|co y|chu y',
+  ].join('|'),
+  'i',
+);
+
+const REJECTED = new RegExp(
+  [
+    '\\b(instead of|rather than|as opposed to|in preference to)\\b',
+    '\\b(dropped|rejected|avoided|abandoned|ruled out|would have)\\b',
+    'thay vi|thay cho|da bo|loai bo|khong dung|dang le',
+  ].join('|'),
+  'i',
+);
+
+/** The sentence that triggered it, so the reader judges the text and not the rule. */
+function decisionExcerpt(text: string): string | null {
+  const sentences = text.split(/(?<=[.!?])\s+|\n{2,}/);
+  const looksDecided = (part: string) => {
+    const folded = fold(part);
+    return CHOSE.test(folded) && REJECTED.test(folded);
+  };
+
+  for (const sentence of sentences) {
+    if (looksDecided(sentence)) return sentence.replace(/\s+/g, ' ').trim().slice(0, 160);
+  }
+  // Split across two sentences is still a decision; take the one naming the
+  // alternative, since that is the half a reader cannot guess.
+  if (!looksDecided(text)) return null;
+  const carrier = sentences.find((sentence) => REJECTED.test(fold(sentence)));
+  return carrier ? carrier.replace(/\s+/g, ' ').trim().slice(0, 160) : null;
+}
+
+/**
  * Which files a walk picks up, decided by exclusion rather than by a list.
  *
  * An allow-list of code extensions is a list that is always slightly wrong:
@@ -162,7 +230,7 @@ const NEVER_AUTO_NAMES = new Set([
  * Documents and exports: indexed when asked for by name, never by wandering in.
  *
  * Storing one of these wholesale is usually the wrong move. What is worth
- * keeping is the conclusion somebody drew from it, written with `memory write`
+ * keeping is the conclusion somebody drew from it, written with `dai-memory write`
  * and a source_ref pointing back at the file -- not a few thousand chunks of
  * path coordinates. But sometimes the file itself is the reference, so:
  *
@@ -224,7 +292,7 @@ export async function ingest(
   const report: IngestReport = {
     files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, symbols: 0,
     removed: 0, superseded: 0, vanished: 0, symbolsRemoved: 0,
-    ignored: [], dense: [], redactions: [],
+    ignored: [], dense: [], candidates: [], redactions: [],
   };
   const redactionTotals = new Map<string, number>();
   const meta = store.getMeta();
@@ -334,6 +402,14 @@ export async function ingest(
         (item) => item.startLine >= piece.startLine && item.startLine <= piece.endLine,
       );
       prepared.push({ node, vector, symbols: covered });
+
+      // Only for chunks this run is actually writing, and only for the artifact
+      // layer: a memory written by hand is already a judgement and does not
+      // need to be offered back as a candidate for one.
+      if (layer === 'artifact') {
+        const excerpt = decisionExcerpt(text);
+        if (excerpt) report.candidates.push({ sourceRef, title, excerpt });
+      }
     }
 
     // One transaction per file, matching the granularity of fileHashes: an ingest
@@ -431,7 +507,7 @@ export async function ingest(
  *
  * Scope is the guard. Only paths under a target named in this run are
  * considered, because absence is evidence of deletion only where we actually
- * looked -- without that, `memory ingest docs` would reclaim the whole of src.
+ * looked -- without that, `dai-memory ingest docs` would reclaim the whole of src.
  * Existence on disk is the test, not membership of the walk: a file passed over
  * for its extension is ignored, not gone, and must survive untouched.
  */
@@ -523,7 +599,7 @@ function titleFor(
  *
  * Paths were resolved against the current directory while the store, the
  * source_ref and the scan list were all anchored to the repository root. Two
- * origins in one command, so `memory ingest docs` worked at the root and failed
+ * origins in one command, so `dai-memory ingest docs` worked at the root and failed
  * one directory down with `No such path: docs` -- for a path that plainly
  * exists. The root wins; the current directory is kept as a fallback so an
  * absolute or genuinely local path still resolves.
@@ -558,11 +634,11 @@ function collectFiles(
 
   const stat = fs.statSync(resolved);
   // A path named outright is a decision already made: honour it whatever it is
-  // called and whatever it weighs. `memory ingest docs/build` is the way past
-  // the block list, and `memory ingest docs/figma/export.svg` past the
+  // called and whatever it weighs. `dai-memory ingest docs/build` is the way past
+  // the block list, and `dai-memory ingest docs/figma/export.svg` past the
   // named-only rule -- a default the user can always overrule for one file.
   //
-  // But naming a file overrules policy, not physics. `memory ingest report.pdf`
+  // But naming a file overrules policy, not physics. `dai-memory ingest report.pdf`
   // used to report `1 new, 1 embedded` and put the raw bytes in the store, as a
   // vector, exit 0 -- a success message for a node nobody can ever read. What
   // to index is the user's call; whether there is anything there to index is
@@ -571,7 +647,7 @@ function collectFiles(
     if (!looksLikeText(resolved)) {
       throw new Error(
         `${target} is not a text file, so there is nothing to index. ` +
-          'Read it with an agent and record the conclusion with `memory write`.',
+          'Read it with an agent and record the conclusion with `dai-memory write`.',
       );
     }
     return [resolved];

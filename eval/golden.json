@@ -1,5 +1,5 @@
 {
-  "note": "A golden set: questions with the answer already known. Three entries, as a shape to copy -- twenty is where the numbers start meaning something. Written by the person who knows what the right answer is, which is the part that cannot be delegated: the first draft of this file scored 50% because it listed usage.md and not usage_vn.md, so every Vietnamese phrasing was marked wrong for returning the Vietnamese translation of the correct section. The set was wrong, not the search.",
+  "note": "Questions whose answer is already known, asked two ways each. q1-q3 are hand-written; q4-q20 were written by an agent that read the repository and was forbidden from running the search -- otherwise it would have tuned the questions to what already works, which is the failure this file exists to avoid. The first draft scored 50% because `expect` listed usage.md and not usage_vn.md, so every Vietnamese phrasing was marked wrong for returning the correct section in the other language. The set was wrong, not the search. That is the harmless direction of that mistake; the dangerous one is a set that only asks what the system answers.",
   "questions": [
     {
       "id": "q1",
@@ -33,6 +33,249 @@
         "README_vn.md"
       ],
       "reject": []
+    },
+    {
+      "id": "q4",
+      "kind": "why",
+      "ask": "why did they pick this particular sentence embedding model instead of a smaller English-only one",
+      "also": "vi sao lai chon model nhung da ngon ngu thay vi model chi co tieng Anh",
+      "expect": [
+        "m0-findings.md",
+        "m0-findings_vn.md",
+        "README.md",
+        "README_vn.md"
+      ],
+      "reject": [
+        "transformers-provider.ts"
+      ]
+    },
+    {
+      "id": "q5",
+      "kind": "how",
+      "ask": "how do I stop it from indexing a folder in my own repo",
+      "also": "is there a way to tell the indexer to leave certain paths alone",
+      "expect": [
+        "memignore.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "project.ts"
+      ]
+    },
+    {
+      "id": "q6",
+      "kind": "what",
+      "ask": "does my .env file end up in the index",
+      "also": "file .env va lockfile co bi dua vao chi muc khong",
+      "expect": [
+        "ingest.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "redact.ts"
+      ]
+    },
+    {
+      "id": "q7",
+      "kind": "trap",
+      "ask": "is there a size limit on what gets indexed",
+      "also": "will a really large source file be left out because of how big it is",
+      "expect": [
+        "ingest.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "mcp.ts",
+        "chunker.ts"
+      ]
+    },
+    {
+      "id": "q8",
+      "kind": "why",
+      "ask": "why can two sessions query the store at the same time without fighting over it",
+      "also": "vi sao nhieu tien trinh doc cung luc ma khong tranh chap khoa ghi",
+      "expect": [
+        "m0-findings.md",
+        "m0-findings_vn.md",
+        "store.ts"
+      ],
+      "reject": [
+        "reopen.ts"
+      ]
+    },
+    {
+      "id": "q9",
+      "kind": "what",
+      "ask": "how many tokens does the plugin spend injecting memory before the agent reads a file",
+      "also": "what is the default ceiling on the context that gets added ahead of a Read or Grep",
+      "expect": [
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "mcp.ts",
+        "README.md"
+      ]
+    },
+    {
+      "id": "q10",
+      "kind": "why",
+      "ask": "why does it only propose a relationship between two notes instead of adding it for me",
+      "also": "what stops it from wiring up edges between related decisions automatically",
+      "expect": [
+        "api.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "cluster.ts"
+      ]
+    },
+    {
+      "id": "q11",
+      "kind": "why",
+      "ask": "why does a query only pull in directly connected memories and not ones two steps away",
+      "also": "vi sao khi tim kiem chi di mot buoc tren do thi ma khong di xa hon",
+      "expect": [
+        "search.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "traverse.ts"
+      ]
+    },
+    {
+      "id": "q12",
+      "kind": "what",
+      "ask": "how many hops can I ask for when walking out from a node",
+      "also": "what is the largest depth the neighbour walk will actually honour",
+      "expect": [
+        "traverse.ts"
+      ],
+      "reject": [
+        "search.ts",
+        "README.md"
+      ]
+    },
+    {
+      "id": "q13",
+      "kind": "how",
+      "ask": "how do I see the results past the first ten",
+      "also": "lam sao xem tiep nhung ket qua khong duoc hien thi o lan dau",
+      "expect": [
+        "usage.md",
+        "usage_vn.md",
+        "search.ts"
+      ],
+      "reject": [
+        "mcp.ts"
+      ]
+    },
+    {
+      "id": "q14",
+      "kind": "what",
+      "ask": "what exactly gets thrown away when I forget old entries, and what is safe",
+      "also": "which recorded notes qualify for removal and which ones are protected from it",
+      "expect": [
+        "api.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "recency.ts"
+      ]
+    },
+    {
+      "id": "q15",
+      "kind": "why",
+      "ask": "why do I have to switch on capturing failed commands myself",
+      "also": "vi sao mac dinh khong tu dong ghi lai cac lenh chay loi",
+      "expect": [
+        "README.md",
+        "README_vn.md",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "api.ts"
+      ]
+    },
+    {
+      "id": "q16",
+      "kind": "trap",
+      "ask": "can I type Vietnamese without the accent marks and still find the note",
+      "also": "does a plain ascii query match text that was written with diacritics",
+      "expect": [
+        "tokenize.ts",
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": [
+        "m0-findings.md",
+        "m0-findings_vn.md"
+      ]
+    },
+    {
+      "id": "q17",
+      "kind": "why",
+      "ask": "why is there no background process that reindexes whenever a file changes",
+      "also": "vi sao khong co che do theo doi file de tu dong cap nhat",
+      "expect": [
+        "README.md",
+        "README_vn.md"
+      ],
+      "reject": [
+        "ui.ts"
+      ]
+    },
+    {
+      "id": "q18",
+      "kind": "how",
+      "ask": "the html page still shows old data after I recorded something, how do I get it current",
+      "also": "what do I run to make the browser view reflect the latest contents of the store",
+      "expect": [
+        "usage.md",
+        "usage_vn.md",
+        "ui.ts"
+      ],
+      "reject": [
+        "store.ts",
+        "reopen.ts"
+      ]
+    },
+    {
+      "id": "q19",
+      "kind": "what",
+      "ask": "what constant is used when the ranked lists get combined into one ordering",
+      "also": "hang so dung khi tron cac danh sach xep hang lai voi nhau la bao nhieu",
+      "expect": [
+        "rrf.ts",
+        "README.md",
+        "README_vn.md"
+      ],
+      "reject": [
+        "bm25.ts"
+      ]
+    },
+    {
+      "id": "q20",
+      "kind": "how",
+      "ask": "the model download keeps failing with a file not found error, what do I do about it",
+      "also": "where do the downloaded weights live and how do I put them somewhere else",
+      "expect": [
+        "transformers-provider.ts",
+        "m0-findings.md",
+        "m0-findings_vn.md",
+        "README.md",
+        "README_vn.md"
+      ],
+      "reject": [
+        "hash-provider.ts"
+      ]
     }
   ]
 }

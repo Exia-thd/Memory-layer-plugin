@@ -180,7 +180,7 @@ async function keywordHits(
     if (hits === null) {
       degradedReason =
         'This store has no persisted keyword index, so it was rebuilt in memory. ' +
-        'Run `memory ingest --force` to build one.';
+        'Run `dai-memory ingest --force` to build one.';
     }
   } catch (err) {
     degradedReason = `Persisted keyword index unreadable, rebuilt in memory: ${
@@ -244,7 +244,7 @@ async function semanticBranch(
     return {
       name: 'semantic',
       ranked: [],
-      unavailableReason: 'No node in this store carries an embedding yet. Run `memory embed`.',
+      unavailableReason: 'No node in this store carries an embedding yet. Run `dai-memory embed`.',
     };
   }
 
@@ -343,7 +343,7 @@ function recencyBranch(
  *
  * The signal Mem0 calls entity linking, and the one this store had the data for
  * and was not using: `ABOUT` edges tie a memory to a named declaration, and
- * only `why` consulted them. `memory search "chargeInvoice"` ran three text
+ * only `why` consulted them. `dai-memory search "chargeInvoice"` ran three text
  * branches over prose that may never contain the word, while the graph sat
  * there holding the exact answer.
  *
@@ -384,7 +384,7 @@ async function entityBranch(
           ranked: [],
           degradedReason:
             'No declaration named in this query carries recorded memory. ' +
-            'Anchors come from a source_ref with a line span, or `memory link ... ABOUT`.',
+            'Anchors come from a source_ref with a line span, or `dai-memory link ... ABOUT`.',
         };
   } catch (err) {
     return {
@@ -464,7 +464,7 @@ async function graphBranch(
       name: 'graph',
       ranked: [],
       degradedReason:
-        'Nothing the other branches found is linked to anything. Record links with `memory link`.',
+        'Nothing the other branches found is linked to anything. Record links with `dai-memory link`.',
     };
   }
 

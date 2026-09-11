@@ -34,13 +34,13 @@ function metaPath(dir: string): string {
 export function readMeta(dir: string): StoreMeta {
   const file = metaPath(dir);
   if (!fs.existsSync(file)) {
-    throw new Error(`No memory store at ${dir}. Run \`memory init\` first.`);
+    throw new Error(`No memory store at ${dir}. Run \`dai-memory init\` first.`);
   }
   const meta = JSON.parse(fs.readFileSync(file, 'utf8')) as StoreMeta;
   if (meta.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(
       `Store schema version ${meta.schemaVersion} does not match this build (${SCHEMA_VERSION}). ` +
-        `Re-run \`memory init\` in a fresh directory rather than reading it as-is.`,
+        `Re-run \`dai-memory init\` in a fresh directory rather than reading it as-is.`,
     );
   }
   return meta;

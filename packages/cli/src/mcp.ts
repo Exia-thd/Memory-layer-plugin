@@ -328,7 +328,7 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
         ...result,
         note: result.queued
           ? 'Another process held the write lock, so this was queued to the session journal. ' +
-            'It is recorded but will not appear in search until `memory merge` runs.'
+            'It is recorded but will not appear in search until `dai-memory merge` runs.'
           : undefined,
         // Said in words, because an agent reads the reply and a bare array of
         // ids reads as noise. The graph branch only retrieves through edges
@@ -354,7 +354,7 @@ async function dispatch(name: string, args: Record<string, unknown>): Promise<un
         ...result,
         note: result.queued
           ? 'Another process held the write lock, so this edge was queued to the session journal. ' +
-            'It is recorded but will not be traversable until `memory merge` runs.'
+            'It is recorded but will not be traversable until `dai-memory merge` runs.'
           : undefined,
       };
     }

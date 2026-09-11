@@ -179,6 +179,142 @@ export async function runSearch(
   }
 }
 
+export const EVAL_FILE = '.memory-eval.json';
+
+export interface EvalQuestion {
+  id: string;
+  kind?: string;
+  ask: string;
+  /** A second phrasing. Without one this measures wording, not understanding. */
+  also?: string;
+  /** Source-ref fragments that count as the right answer. */
+  expect: string[];
+  /** Fragments that are plausible and wrong. The column that makes the score mean something. */
+  reject?: string[];
+}
+
+export interface EvalRow {
+  label: string;
+  asked: number;
+  found: number;
+  rejected: number;
+  /** Wilson 95% interval on the recall rate. */
+  low: number;
+  high: number;
+}
+
+export interface EvalReport {
+  questions: number;
+  topK: number;
+  rows: EvalRow[];
+  /** Questions no configuration answered, which are the ones worth reading. */
+  missed: { id: string; ask: string; got: string[] }[];
+}
+
+/**
+ * A two-sided 95% Wilson interval.
+ *
+ * Five of six and seventeen of twenty are both about 85%, and only one of them
+ * is a finding. Printing the width is the report declining to let a small set
+ * pass for evidence.
+ */
+function wilson(successes: number, total: number): { low: number; high: number } {
+  if (total <= 0) return { low: 0, high: 1 };
+  const z = 1.959963984540054;
+  const p = successes / total;
+  const z2 = z * z;
+  const denominator = 1 + z2 / total;
+  const centre = (p + z2 / (2 * total)) / denominator;
+  const spread = (z * Math.sqrt((p * (1 - p) + z2 / (4 * total)) / total)) / denominator;
+  return { low: Math.max(0, centre - spread), high: Math.min(1, centre + spread) };
+}
+
+/**
+ * Scores retrieval against a set of questions whose answer is already known.
+ *
+ * The test suite answers "does this do what it was built to do". This answers
+ * the one none of those touch: does it find the right thing. A store can pass
+ * every test and return the wrong document.
+ *
+ * The set lives in the user's repository rather than in this package, for the
+ * same reason `.memignore` does: the questions name files in *their* project
+ * and the right answers are theirs to know. A set shipped with the plugin would
+ * measure the plugin's own documentation, which is a different question and one
+ * nobody asked.
+ *
+ * Each configuration disables one branch, because a branch cannot be shown to
+ * earn its place until it can be taken away. If recall holds when a branch is
+ * removed, that branch contributed nothing to these questions -- which is a
+ * fact about the questions as much as about the branch, and worth seeing either
+ * way.
+ */
+export async function runEval(
+  options: { from?: string; topK?: number } = {},
+): Promise<EvalReport> {
+  const project = resolveProject(options.from);
+  const file = nodePath.join(project.root, EVAL_FILE);
+
+  let parsed: { questions?: EvalQuestion[] } | EvalQuestion[];
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(
+      `No question set at ${file}. ` +
+        'Write one: each entry needs `ask`, `expect` (source-ref fragments that are ' +
+        'correct) and ideally `also` (the same question worded differently) and ' +
+        '`reject` (fragments that are plausible and wrong). ' +
+        `(${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+
+  const questions = Array.isArray(parsed) ? parsed : parsed.questions ?? [];
+  if (questions.length === 0) throw new Error(`${file} contains no questions.`);
+
+  const topK = options.topK ?? 5;
+  const configurations: Array<{ label: string; disable: string[] }> = [
+    { label: 'all branches', disable: [] },
+    { label: 'without bm25', disable: ['bm25'] },
+    { label: 'without semantic', disable: ['semantic'] },
+    { label: 'without entity', disable: ['entity'] },
+    { label: 'without graph', disable: ['graph'] },
+  ];
+
+  const rows: EvalRow[] = [];
+  const missed: EvalReport['missed'] = [];
+
+  for (const configuration of configurations) {
+    let asked = 0;
+    let found = 0;
+    let rejected = 0;
+
+    for (const question of questions) {
+      for (const phrasing of [question.ask, question.also].filter(Boolean) as string[]) {
+        asked += 1;
+        const result = await runSearch(phrasing, {
+          from: options.from,
+          limit: topK,
+          disable: configuration.disable,
+        });
+        const refs = result.results.map((hit) => hit.sourceRef ?? '');
+
+        const hit = question.expect.some((want) => refs.some((ref) => ref.includes(want)));
+        if (hit) found += 1;
+        if ((question.reject ?? []).some((bad) => refs.some((ref) => ref.includes(bad)))) {
+          rejected += 1;
+        }
+        // Only the full configuration decides what counts as unanswerable.
+        if (!hit && configuration.disable.length === 0) {
+          missed.push({ id: question.id, ask: phrasing, got: refs.slice(0, 3) });
+        }
+      }
+    }
+
+    rows.push({ label: configuration.label, asked, found, rejected, ...wilson(found, asked) });
+  }
+
+  return { questions: questions.length, topK, rows, missed };
+}
+
 export interface IndexEntry {
   id: string;
   title: string;
@@ -206,7 +342,7 @@ export interface IndexResult {
  *
  * That is the whole idea: decide what to read *from* a list you can see, rather
  * than being handed the first few in full and told there were more. The
- * snippets are still there; `memory search` and `memory get` fetch them for the
+ * snippets are still there; `dai-memory search` and `dai-memory get` fetch them for the
  * entries worth opening.
  */
 export async function runIndex(
@@ -548,7 +684,7 @@ export async function runWrite(
       });
     }
     // A queued write cannot read the graph, so there is nothing to link or
-    // suggest yet. `memory merge` folds the node in; the anchors follow it.
+    // suggest yet. `dai-memory merge` folds the node in; the anchors follow it.
     return { id: node.id, queued: true, redactions, about: [], related: [] };
   } finally {
     await store?.close();
@@ -882,7 +1018,7 @@ export async function runSummarize(
   } finally {
     await store.close();
   }
-  if (!found) throw new Error(`No cluster ${clusterId} in the current grouping. Run \`memory clusters\` first.`);
+  if (!found) throw new Error(`No cluster ${clusterId} in the current grouping. Run \`dai-memory clusters\` first.`);
 
   const title = options.title ?? `Area: ${found.terms.slice(0, 3).join(', ') || `cluster ${clusterId}`}`;
   const written = await runWrite(
