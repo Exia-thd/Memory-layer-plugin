@@ -6,7 +6,7 @@ import {
 import * as api from './api.js';
 import nodeFs from 'node:fs';
 import nodePath from 'node:path';
-import { resolveProject, storeDirOrThrow, describeScanTargets } from './project.js';
+import { resolveProject, storeDirOrThrow } from './project.js';
 // Imported where it is used, not at the top.
 //
 // `mcp.js` drags in the MCP SDK, which cost 290ms on every command that is not
@@ -20,26 +20,28 @@ import { resolveProject, storeDirOrThrow, describeScanTargets } from './project.
  */
 
 /**
- * Chooses what to scan and says why, before a single file is read.
+ * With no paths named, the whole repository -- not a guess about which parts
+ * of it matter.
  *
- * A guess that cannot be checked is the thing to avoid here: the scan decides
- * what the store will know, and a wrong guess is invisible afterwards -- the
- * store simply has less in it, and nothing says so. Printing the reason turns
- * the guess into something the reader can disagree with in the second it takes
- * to read.
+ * The scan used to pick directories: conventional names, plus any directory
+ * that looked like a project. That was a guess, and a guess about a tree is
+ * wrong about exactly the trees that are organised: markdown in `notes/` or
+ * `wiki/` or `design/` -- sometimes the repository's own hand-kept memory --
+ * matched neither rule and was silently left out.
+ *
+ * Guessing was only ever there to keep vendored code and build output out of
+ * the store, and the walk now does that itself, by rule: dependency and build
+ * directories, secrets and lockfiles, binaries, `.memignore`, each skip
+ * reported with its reason. With those in place the root is the right target
+ * and the guess has nothing left to protect.
  */
-function announceScan(root: string, quiet: boolean): string[] {
-  const targets = describeScanTargets(root);
-  if (targets.length === 0) return [];
-
+function announceScan(quiet: boolean): string[] {
   if (!quiet) {
-    process.stdout.write(`scanning ${targets.map((t) => t.path).join(', ')}\n`);
-    for (const target of targets) {
-      if (target.reason === 'conventional name') continue;
-      process.stdout.write(`   ${target.path}  (${target.reason})\n`);
-    }
+    process.stdout.write(
+      'scanning the whole repository (dependencies, build output, secrets and binaries are skipped)\n',
+    );
   }
-  return targets.map((target) => target.path);
+  return ['.'];
 }
 
 /**
@@ -51,13 +53,13 @@ function announceScan(root: string, quiet: boolean): string[] {
  * depending on how it was invoked is harder to read than one that does not.
  * Quiet under --json, where anything on stdout is no longer JSON.
  */
-function chooseScan(args: Args, root: string): string[] {
+function chooseScan(args: Args): string[] {
   const quiet = Boolean(args.flags.json) || Boolean(args.flags.quiet);
   if (args.positional.length > 0) {
     if (!quiet) process.stdout.write(`scanning ${args.positional.join(', ')}\n`);
     return args.positional;
   }
-  return announceScan(root, quiet);
+  return announceScan(quiet);
 }
 
 /**
@@ -261,7 +263,7 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'init': {
-      const targets = args.flags['no-scan'] ? [] : chooseScan(args, resolveProject().root);
+      const targets = args.flags['no-scan'] ? [] : chooseScan(args);
 
 
       const { storeDir, report, scanned, page } = await api.init({
@@ -286,25 +288,14 @@ async function main(argv: string[]): Promise<number> {
 ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.files} files\n`,
         );
         if (page) process.stdout.write(`open ${page}\n`);
-      } else if (targets.length === 0 && !args.flags['no-scan']) {
-        process.stdout.write(
-          '\nNothing conventional to scan here. Point it somewhere: dai-memory ingest <paths>\n',
-        );
       }
       return 0;
     }
 
     case 'ingest': {
-      // No paths is the common case, not an error: the daily command should be
-      // `dai-memory ingest`, deciding the same way init did rather than making the
-      // user retype a list they already approved once.
-      const paths = chooseScan(args, resolveProject().root);
-      if (paths.length === 0) {
-        throw new Error(
-          'Nothing conventional to scan here, and nothing named. ' +
-            'Point it somewhere: dai-memory ingest <paths>',
-        );
-      }
+      // No paths is the common case, not an error: the daily command is
+      // `dai-memory ingest`, and with nothing named it reads the whole tree.
+      const paths = chooseScan(args);
       const report = await api.runIngest(paths, {
         layer: layerFlag(args),
         force: Boolean(args.flags.force),

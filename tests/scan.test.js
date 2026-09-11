@@ -61,7 +61,7 @@ test('init run from a subdirectory scans the whole project', async () => {
   }
 });
 
-test('ingest with no paths makes the same choice init does', async () => {
+test('ingest with no paths reads the whole repository', async () => {
   const repo = makeRepo({
     'docs/note.md': '# Note\n\necho foxtrot.\n',
     'src/charge.js': CHARGE,
@@ -69,69 +69,82 @@ test('ingest with no paths makes the same choice init does', async () => {
   try {
     cli(repo, ['init', '--no-scan']);
     const out = cli(repo, ['ingest']);
-    assert.match(out, /scanning docs, src/, `no scan announced: ${out}`);
+    assert.match(out, /scanning the whole repository/, `no scan announced: ${out}`);
     assert.match(out, /2 new/, out);
   } finally {
     repo.cleanup();
   }
 });
 
-test('a directory the list cannot name is found by looking inside it', async () => {
+test('markdown is indexed in a directory with any name, at any depth', async () => {
   const repo = makeRepo({
-    'docs/note.md': '# Note\n\ngolf hotel.\n',
-    // The layout people actually keep: several checkouts beside one shared docs
-    // tree, named whatever the user named them. No list will ever contain these.
-    'repoA/package.json': '{"name":"a"}\n',
-    'repoA/src/a.js': 'export function alphaFn() {}\n',
-    'repoB/src/b.js': 'export function bravoFn() {}\n',
-    'notes-only/x.md': '# X\n\nnot a project.\n',
+    // The trees that are organised are exactly the ones a guess gets wrong.
+    // Measured on a real C# repository, `openspec/` held 408 markdown files and
+    // the old rule -- conventional names plus anything that looked like a
+    // project -- matched none of them.
+    'notes/design.md': '# Design\n\nalphanotes.\n',
+    'wiki/intro.md': '# Wiki\n\nbravowiki.\n',
+    'openspec/changes/2024/q3/proposal.md': '# Proposal\n\ncharliespec.\n',
+    'human-only/handbook.md': '# Handbook\n\ndeltahuman.\n',
+    'README.md': '# R\n\nechoroot.\n',
   });
   try {
     cli(repo, ['init', '--no-scan']);
-    const out = cli(repo, ['ingest']);
-
-    assert.match(out, /repoA/, `an obvious project was not found: ${out}`);
-    assert.match(out, /repoB/, out);
-    // The reason is printed, so a wrong guess is arguable rather than invisible.
-    assert.match(out, /repoA\s+\(package\.json\)/, `no reason given: ${out}`);
-    assert.match(out, /repoB\s+\(src\)/, out);
-
-    // A directory of loose files is not a project, and is not swept in. This is
-    // the half that keeps the first run from being a store full of noise.
-    assert.doesNotMatch(out, /notes-only/, `a plain directory was swept in: ${out}`);
-
-    const names = JSON.parse(cli(repo, ['map', '--json'])).files
-      .flatMap((file) => file.symbols.map((symbol) => symbol.name))
-      .sort();
-    assert.deepEqual(names, ['alphaFn', 'bravoFn']);
+    cli(repo, ['ingest']);
+    for (const [term, file] of [
+      ['alphanotes', /design\.md/], ['bravowiki', /intro\.md/],
+      ['charliespec', /proposal\.md/], ['deltahuman', /handbook\.md/], ['echoroot', /README\.md/],
+    ]) {
+      assert.match(cli(repo, ['search', term]), file, `${term} was not indexed`);
+    }
   } finally {
     repo.cleanup();
   }
 });
 
-test('node_modules is never a project, whatever it contains', async () => {
+test('vendored code is never indexed, even though the whole tree is walked', async () => {
   const repo = makeRepo({
     'docs/note.md': '# Note\n\nindia juliett.\n',
-    'node_modules/pkg/package.json': '{"name":"pkg"}\n',
-    'node_modules/pkg/src/index.js': 'export function vendored() {}\n',
-    'vendor/thing/package.json': '{"name":"thing"}\n',
+    'node_modules/pkg/src/index.js': 'export function vendoredzulu() {}\n',
+    'vendor/thing/lib.php': '<?php function vendorzulu() {}\n',
+    'packages/app/node_modules/dep/i.js': 'export function nestedzulu() {}\n',
   });
   try {
     cli(repo, ['init', '--no-scan']);
     const out = cli(repo, ['ingest']);
-    assert.doesNotMatch(out, /node_modules/, `vendored code was scanned: ${out}`);
-    assert.doesNotMatch(out, /scanning[^\n]*vendor/, out);
+    // Walking the root is only safe because the walk refuses these by rule,
+    // wherever they sit -- including a node_modules three levels down.
+    for (const term of ['vendoredzulu', 'vendorzulu', 'nestedzulu']) {
+      assert.doesNotMatch(cli(repo, ['search', term]), /#L/, `${term} was indexed`);
+    }
+    // And the refusal is said out loud rather than silent.
+    assert.match(out, /excluded directory/, `the skip was not reported: ${out}`);
   } finally {
     repo.cleanup();
   }
 });
 
-test('apps is recognised, not only app', async () => {
-  const repo = makeRepo({ 'apps/web/main.js': 'export function webMain() {}\n' });
+test('project configuration in dot-directories is indexed; tool state is not', async () => {
+  const repo = makeRepo({
+    '.github/workflows/ci.yml': 'name: ci\n# deploy only on tags: workflowzulu\n',
+    '.husky/pre-commit': 'npm test # huskyzulu\n',
+    // A team's agents and skills: architectural conventions, committed.
+    '.claude/skills/arch-module/SKILL.md': '# Module rules\n\narchzulu.\n',
+    // One developer's permissions -- personal, by the `.local` convention.
+    '.claude/settings.local.json': '{"note":"localzulu"}\n',
+    '.vscode/settings.json': '{"note":"vscodezulu"}\n',
+    '.idea/workspace.xml': '<x>ideazulu</x>\n',
+    'src/app.js': 'export function app() {}\n',
+  });
   try {
     cli(repo, ['init', '--no-scan']);
-    const out = cli(repo, ['ingest']);
-    assert.match(out, /scanning apps/, `the plural spelling is still invisible: ${out}`);
+    cli(repo, ['ingest']);
+    for (const term of ['workflowzulu', 'huskyzulu', 'archzulu']) {
+      assert.match(cli(repo, ['search', term]), /#L/, `${term} was not indexed`);
+    }
+    for (const term of ['localzulu', 'vscodezulu', 'ideazulu']) {
+      assert.doesNotMatch(cli(repo, ['search', term]), /#L/, `${term} was indexed`);
+    }
   } finally {
     repo.cleanup();
   }
@@ -317,17 +330,16 @@ test('--json output stays parseable when a scan is announced', async () => {
   }
 });
 
-test('a project with nothing to scan says so instead of failing obscurely', async () => {
-  // No conventional directory, no markdown, nothing that looks like a project
-  // one level down. Markdown at the root is always a target now, so a file like
-  // `random.md` would make this repository scannable -- which is the point of
-  // that rule and the reason this fixture cannot use one.
-  const repo = makeRepo({ 'random.txt': 'xray yankee.\n' });
+test('a repository with nothing indexable says what it skipped', async () => {
+  // The scan target is always the whole tree now, so "nothing to scan" cannot
+  // happen. What can is a tree where every file is refused -- and that must not
+  // look like an empty success.
+  const repo = makeRepo({ 'logo.png': 'bytes\n', 'config/.env': 'SECRET=x\n' });
   try {
     cli(repo, ['init', '--no-scan']);
-    const result = cliRaw(repo, ['ingest']);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Point it somewhere/, result.stderr);
+    const out = cli(repo, ['ingest']);
+    assert.match(out, /0 new/, out);
+    assert.match(out, /skipped \d+:/, `refusals were not reported: ${out}`);
   } finally {
     repo.cleanup();
   }

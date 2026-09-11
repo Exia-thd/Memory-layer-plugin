@@ -19,7 +19,7 @@ install the plugin
 dai-memory init ──────────────────────────────────────────┐
         │  creates .memory/                          │
         │  probes what this platform can do          │  one command
-        │  scans docs/ src/ README.md …              │
+        │  scans the whole repository tree           │
         │  builds the code graph (files → symbols)   │
         │  writes .memory/ui.html                    │
         ▼                                             ┘
@@ -35,7 +35,7 @@ dai-memory write ────────────── a decision, by hand,
         │
         ▼
 dai-memory ingest ───────────── after files change (put it in post-commit)
-        │  no paths: the same choice init made
+        │  no paths: the whole repository tree
         │  replaces what those files produced before
         │  reclaims files that are no longer on disk
         │  rewrites ui.html
@@ -67,8 +67,29 @@ that nothing points at, and it will not touch a decision however old it gets.
 dai-memory init
 ```
 
-Creates the store in `.memory/`, probes what this platform can actually do,
-and prints the result. Read that output — it is the only place that tells you
+Creates the store in `.memory/`, scans **the whole repository tree**, probes
+what this platform can actually do, and prints the result.
+
+It does not guess which directories matter. It used to: conventional names
+(`docs/`, `src/`…) plus anything that looked like a project. Measured on a real
+C# repository, that rule skipped `openspec/` with 408 markdown files, and
+`wiki/` and `human-only/` with it, because none of those names were on any
+list. The more carefully a tree is organised, the more wrong a guess gets.
+
+The guess only ever existed to keep vendored code and build output out, and the
+walk now does that itself, by rule and at any depth: dependency and build
+directories, secrets, lockfiles, binaries, `.memignore` -- each skip reported
+with its reason. With those in place the root is the right target.
+
+Dot-directories are skipped, except the ones that hold the project's own
+configuration: `.github`, `.gitlab`, `.husky`, `.circleci`, `.devcontainer`,
+and `.claude`, where a team keeps its agents, commands and skills --
+architectural conventions like `arch-module`, written down and committed.
+`.vscode` and `.idea` stay out as one developer's editor, and so does
+`.claude/settings.local.json`. Claude's automatic memory lives in the home
+directory, outside every repository, and the walk never reaches it.
+
+The result: Read that output — it is the only place that tells you
 whether semantic search is real or a fallback:
 
 ```

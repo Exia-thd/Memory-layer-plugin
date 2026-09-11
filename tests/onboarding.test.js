@@ -40,7 +40,7 @@ test('init scans the project and leaves it usable in one command', async () => {
   try {
     const out = cli(repo, ['init']);
 
-    assert.match(out, /scanning .*docs/, 'init did not report what it was going to scan');
+    assert.match(out, /scanning the whole repository/, 'init did not report what it was going to scan');
     assert.match(out, /\d+ memories, \d+ declarations from \d+ files/, 'init did not scan');
 
     // The code graph is there without a second command.

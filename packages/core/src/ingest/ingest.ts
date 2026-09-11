@@ -97,6 +97,34 @@ const SKIP_DIRECTORIES = new Set([
 ]);
 
 /**
+ * Dot-directories that hold the project's own configuration.
+ *
+ * Every other dot-directory is a cache, tool state or an editor's scratch
+ * space, and skipping them wholesale is right. These are the exceptions, and
+ * they were being skipped with the rest: a CI workflow saying deploys run only
+ * on tags, a git hook refusing unsigned commits -- decisions, recorded in the
+ * repository, invisible to a layer that exists to keep decisions.
+ *
+ * Kept short and named, rather than inverted into "every dot-directory except
+ * the caches", because an unknown dot-directory is far more often a cache than
+ * a config, and the cost of guessing wrong is a store full of build state.
+ * `.vscode` and `.idea` stay out: they are one developer's editor, not the
+ * project.
+ *
+ * `.claude` is here for the same reason `.github` is. In a repository that uses
+ * it, it holds the team's own agents, commands and skills -- `arch-module`,
+ * `design-db-schema`, `arch-testing` -- which is to say the architectural
+ * conventions, written down and committed. Measured on a real C# repository it
+ * held 50 markdown files, all skipped, and they were the most deliberate prose
+ * in the tree. It is not Claude's automatic memory: that lives under the home
+ * directory, outside every repository, and a walk of the tree never reaches it.
+ */
+const PROJECT_DOT_DIRECTORIES = new Set([
+  '.github', '.gitlab', '.husky', '.circleci', '.devcontainer', '.buildkite',
+  '.claude',
+]);
+
+/**
  * The size past which a *machine-generated* file is left alone.
  *
  * Source and prose are never refused for being large, whatever they weigh. A
@@ -224,6 +252,9 @@ const NEVER_AUTO_NAMES = new Set([
   'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb',
   'poetry.lock', 'Cargo.lock', 'composer.lock', 'Gemfile.lock', 'go.sum',
   'id_rsa', 'id_ed25519', '.npmrc', '.netrc', 'credentials',
+  // One developer's permissions, by the same convention as `.env.local`: the
+  // `.local` variant is personal and usually not committed.
+  'settings.local.json',
 ]);
 
 /**
@@ -664,7 +695,7 @@ function collectFiles(
       // indexes a project's agent configuration, and it does not. An exception
       // that cannot run is worse than none: it describes behaviour that is not
       // there. Name it to index it, like any other skipped directory.
-      if (entry.name.startsWith('.')) {
+      if (entry.name.startsWith('.') && !PROJECT_DOT_DIRECTORIES.has(entry.name)) {
         if (entry.isDirectory()) {
           ignored.push({ path: label(full), reason: 'excluded directory', detail: entry.name });
         }
@@ -697,8 +728,11 @@ function collectFiles(
 
       const extension = path.extname(entry.name).toLowerCase();
       const lower = entry.name.toLowerCase();
-      // From the first dot, so `app.min.js` is `.min.js` and not `.js`.
-      const compound = lower.slice(lower.indexOf('.'));
+      // From the first dot, so `app.min.js` is `.min.js` and not `.js`. A name
+      // with no dot at all -- `pre-commit`, `Makefile` -- has no compound
+      // extension; slicing from -1 would have returned its last letter.
+      const firstDot = lower.indexOf('.');
+      const compound = firstDot === -1 ? '' : lower.slice(firstDot);
 
       if (NAMED_ONLY_EXTENSIONS.has(extension)) {
         ignored.push({ path: label(full), reason: 'not indexed unless named', detail: extension });

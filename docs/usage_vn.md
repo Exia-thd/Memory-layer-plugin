@@ -18,7 +18,7 @@ cài plugin
 dai-memory init ──────────────────────────────────────────┐
         │  tạo .memory/                              │
         │  dò xem nền này làm được gì                │  một lệnh
-        │  quét docs/ src/ README.md …               │
+        │  quét toàn bộ cây repo                     │
         │  dựng code graph (file → khai báo)         │
         │  ghi .memory/ui.html                       │
         ▼                                             ┘
@@ -34,7 +34,7 @@ dai-memory write ────────────── ghi một quyết đ
         │
         ▼
 dai-memory ingest ───────────── sau khi file đổi (nên đặt vào post-commit)
-        │  không tham số: chọn y như init đã chọn
+        │  không tham số: quét toàn bộ cây repo
         │  thu hồi file không còn trên đĩa
         │  thay thế những gì file đó từng sinh ra
         │  ghi lại ui.html
@@ -69,11 +69,23 @@ dai-memory init
 Một lệnh. Nó tạo kho, dò xem nền này làm được gì, quét dự án, dựng code graph, và
 ghi ra trang xem.
 
-Quét bao gồm những chỗ quy ước mà một dự án hay để tài liệu, quyết định và mã
-nguồn — `docs/`, `adr/`, `src/`, `lib/`, `packages/`, `README.md` và các anh em
-thường gặp — rồi **báo trước** nó tìm thấy những gì, để phỏng đoán là thứ nhìn
-thấy được chứ không âm thầm. Nó cố ý **không** quét `.`: quét cả repo sẽ vơ luôn
-code vendor và output build, và thứ đầu tiên bạn thấy sẽ là một kho đầy rác.
+Nó quét **toàn bộ cây repo**, không đoán thư mục nào quan trọng. Trước đây nó
+chỉ nhận tên quy ước (`docs/`, `src/`...) cộng các thư mục trông giống một dự án,
+và đo trên một repo C# thật thì cách đó **bỏ sạch** thư mục `openspec/` với 408
+file markdown, cùng `wiki/` và `human-only/`, chỉ vì tên của chúng không nằm trong
+danh sách nào. Cây thư mục càng được tổ chức kỹ thì đoán càng sai.
+
+Đoán thư mục vốn chỉ để tránh vơ code vendor và output build vào kho. Giờ lần
+quét tự loại những thứ đó **theo luật**, ở mọi độ sâu: thư mục thư viện và build,
+bí mật, lockfile, file nhị phân, `.memignore`, và mục nào bị bỏ cũng được báo kèm
+lý do. Có đủ những luật đó rồi thì gốc repo là mục tiêu đúng.
+
+Thư mục bắt đầu bằng dấu chấm thì bị bỏ, trừ những thư mục chứa **cấu hình của
+dự án**: `.github`, `.gitlab`, `.husky`, `.circleci`, `.devcontainer`, và
+`.claude`, nơi team để agent, command và skill (ví dụ quy ước kiến trúc
+`arch-module`). `.vscode` và `.idea` vẫn bị bỏ vì đó là editor của một người, và
+`.claude/settings.local.json` cũng bị bỏ vì là cài đặt cá nhân. Auto memory của
+Claude nằm ở thư mục home, ngoài repo, nên lần quét không bao giờ chạm tới.
 
 ```bash
 dai-memory init docs src/billing   # quét đúng những đường dẫn này

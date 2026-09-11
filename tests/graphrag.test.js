@@ -249,8 +249,7 @@ test('every markdown at the root is scanned, CLAUDE.md included', async () => {
   });
   try {
     cli(repo, ['init', '--no-scan']);
-    const out = cli(repo, ['ingest']);
-    assert.match(out, /CLAUDE\.md/, `CLAUDE.md not scanned: ${out}`);
+    cli(repo, ['ingest']);
 
     for (const term of ['indiaroot', 'juliettclaude', 'kiloagents', 'limanotes']) {
       assert.match(cli(repo, ['search', term]), /#L/, `${term} not indexed`);

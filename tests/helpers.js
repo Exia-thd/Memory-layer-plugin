@@ -15,8 +15,11 @@ export const CLI = path.join(REPO_ROOT, 'packages', 'cli', 'dist', 'cli.js');
  */
 export function makeRepo(files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memtest-'));
-  const home = path.join(dir, 'home');
-  fs.mkdirSync(home, { recursive: true });
+  // Beside the repository, not inside it. A real MEMORY_LAYER_HOME lives in the
+  // user's home directory; nesting it in the fixture meant a scan of the whole
+  // tree indexed the registry file into every test store, which is a fixture
+  // artifact no user could ever see.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'memhome-'));
 
   for (const [relative, content] of Object.entries(files)) {
     const full = path.join(dir, relative);
@@ -31,7 +34,14 @@ export function makeRepo(files = {}) {
   git(['add', '-A']);
   git(['commit', '-qm', 'fixture']);
 
-  return { dir, home, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    home,
+    cleanup: () => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    },
+  };
 }
 
 export function env(repo, extra = {}) {
