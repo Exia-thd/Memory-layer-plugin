@@ -111,6 +111,7 @@ const USAGE = `dai-memory - project memory layer
   dai-memory index <query> [--limit N] [--offset N] [--layer L] [--json]
                           titles only, ~15 tokens each -- pick before you read
   dai-memory search <query> [--limit N] [--offset N] [--layer L] [--json]
+                          [--disable bm25,semantic,entity,graph]  measure a branch by removing it
   dai-memory why <file|symbol> [--limit N] [--offset N] [--json]   decisions touching it
   dai-memory get <id> [--json]            one node plus its direct edges
   dai-memory graph <id> [--depth N] [--edge TYPE] [--json]
@@ -348,6 +349,9 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         offset: numberFlag(args, 'offset'),
         layers: layerFlag(args) ? [layerFlag(args)!] : undefined,
         disableBm25: Boolean(args.flags['no-bm25']),
+        // `--disable semantic,graph` -- the flag that turns "is this branch
+        // worth its cost" from an opinion into a measurement.
+        disable: stringFlag(args, 'disable')?.split(',').map((name) => name.trim()),
       });
       emit(args, result, () => formatSearch(result));
       return 0;

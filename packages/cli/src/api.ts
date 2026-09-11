@@ -154,17 +154,25 @@ export async function runIngest(
 export async function runSearch(
   query: string,
   options: {
-    from?: string; limit?: number; offset?: number; layers?: Layer[]; disableBm25?: boolean;
+    from?: string; limit?: number; offset?: number; layers?: Layer[];
+    /** Branch names to switch off, for measuring what each one contributes. */
+    disable?: string[];
+    disableBm25?: boolean;
   } = {},
 ): Promise<SearchResult> {
   const store = new MemoryStore(storeDirOrThrow(options.from), { readOnly: true });
   try {
     const provider = await embedder(store.dimensions);
+    const off = new Set(options.disable ?? []);
     return await search(store, query, provider, {
       limit: options.limit ?? 10,
       offset: options.offset,
       layers: options.layers,
-      disableBm25: options.disableBm25,
+      // A branch cannot be shown to earn its place until it can be taken away.
+      disableBm25: options.disableBm25 || off.has('bm25'),
+      disableSemantic: off.has('semantic'),
+      disableEntity: off.has('entity'),
+      disableGraph: off.has('graph'),
     });
   } finally {
     await store.close();

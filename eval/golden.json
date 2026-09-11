@@ -1,0 +1,38 @@
+{
+  "note": "A golden set: questions with the answer already known. Three entries, as a shape to copy -- twenty is where the numbers start meaning something. Written by the person who knows what the right answer is, which is the part that cannot be delegated: the first draft of this file scored 50% because it listed usage.md and not usage_vn.md, so every Vietnamese phrasing was marked wrong for returning the Vietnamese translation of the correct section. The set was wrong, not the search.",
+  "questions": [
+    {
+      "id": "q1",
+      "ask": "why is there no CALLS edge in the code graph",
+      "also": "tai sao code graph khong co quan he goi ham",
+      "expect": [
+        "schema.ts"
+      ],
+      "reject": [
+        "mcp.ts"
+      ]
+    },
+    {
+      "id": "q2",
+      "ask": "how do I get a PDF into memory",
+      "also": "lam sao dua file PDF vao memory",
+      "expect": [
+        "usage.md",
+        "usage_vn.md"
+      ],
+      "reject": []
+    },
+    {
+      "id": "q3",
+      "ask": "where did the embedding cutoff number come from",
+      "also": "nguong embedding lay tu dau",
+      "expect": [
+        "m0-findings.md",
+        "README.md",
+        "m0-findings_vn.md",
+        "README_vn.md"
+      ],
+      "reject": []
+    }
+  ]
+}
