@@ -25,6 +25,32 @@ function payloadOf(html) {
   return JSON.parse(match[1].replace(/\u003c/g, '<'));
 }
 
+/** Mirrors relatedMemories() in the page: how many memories a click on `node` lists. */
+function relatedCount(payload, node) {
+  if (payload.memories.some((memory) => memory.id === node.id)) return 1;
+  const wanted = new Set();
+  if (node.group === 'symbol' || node.group === 'file') {
+    const { owner, about } = payload.graph.relations;
+    const declared = new Set([node.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [id, parent] of Object.entries(owner)) {
+        if (declared.has(parent) && !declared.has(id)) {
+          declared.add(id);
+          grew = true;
+        }
+      }
+    }
+    for (const id of declared) for (const memoryId of about[id] ?? []) wanted.add(memoryId);
+  }
+  if (node.group === 'file') {
+    for (const memory of payload.memories) {
+      if ((memory.sourceRef || '').startsWith(node.label)) wanted.add(memory.id);
+    }
+  }
+  return wanted.size;
+}
+
 function seeded() {
   const repo = makeRepo({
     'src/charge.js': 'export function chargeInvoice(invoice) {\n  return psp.capture(invoice.amount);\n}\n',
@@ -149,31 +175,7 @@ test('clicking any node finds the memory it is about, not only the leaves', asyn
   const repo = seeded();
   try {
     const payload = payloadOf(built(repo).html);
-    const links = payload.graph.links;
-    const memoryIds = new Set(payload.memories.map((memory) => memory.id));
-
-    // Mirrors relatedMemories() in the page.
-    const related = (node) => {
-      if (memoryIds.has(node.id)) return 1;
-      const wanted = new Set();
-      if (node.group === 'symbol') {
-        for (const link of links) {
-          if (link.kind === 'ABOUT' && link.target === node.id) wanted.add(link.source);
-        }
-      } else if (node.group === 'file') {
-        const declared = new Set();
-        for (const link of links) {
-          if (link.kind === 'DECLARES' && link.source === node.id) declared.add(link.target);
-        }
-        for (const link of links) {
-          if (link.kind === 'ABOUT' && declared.has(link.target)) wanted.add(link.source);
-        }
-        for (const memory of payload.memories) {
-          if ((memory.sourceRef || '').startsWith(node.label)) wanted.add(memory.id);
-        }
-      }
-      return wanted.size;
-    };
+    const related = (node) => relatedCount(payload, node);
 
     const dead = payload.graph.nodes.filter((node) => related(node) === 0);
     assert.equal(
@@ -195,6 +197,54 @@ test('a click that finds nothing still says so', async () => {
     const { html } = built(repo);
     assert.match(html, /Nothing is recorded about/, 'an empty result is silent');
     assert.match(html, /show everything/, 'no way back from a narrowed list');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('under a node budget, the code graph is drawn before file chunks', async () => {
+  // Memories went first, so on a real repository 7,567 chunks took all 1,500
+  // places and the page called a code graph showed no file and no declaration.
+  const repo = seeded();
+  try {
+    const payload = payloadOf(built(repo, ['--max-nodes', '2']).html);
+    const groups = payload.graph.nodes.map((node) => node.group);
+    assert.deepEqual(groups.sort(), ['file', 'symbol'], `drawn instead: ${groups.join(', ')}`);
+    assert.ok(payload.truncated, 'a cut graph was not reported as cut');
+    assert.ok(payload.truncated.omitted.chunks > 0, `omitted: ${JSON.stringify(payload.truncated.omitted)}`);
+    assert.ok(payload.memories.length > 0, 'the Memories tab lost what the graph left out');
+
+    // The chunks are not drawn, and their ABOUT links went with them; a click
+    // on the declaration must still find what is about it.
+    const symbol = payload.graph.nodes.find((node) => node.group === 'symbol');
+    assert.ok(relatedCount(payload, symbol) > 0, 'clicking an undrawn memory\'s declaration found nothing');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a method hangs off its class, and clicking the class finds what is about its methods', async () => {
+  const methods = Array.from({ length: 12 }, (_, i) =>
+    `    public Order Load${i}(int id)\n    {\n        // step ${i}: validate, then fetch the order row\n        return _repo.Find(id);\n    }\n`).join('\n');
+  const repo = makeRepo({
+    'src/OrderService.cs': `namespace Inventory.Api;\n\npublic class OrderService\n{\n${methods}}\n`,
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src']);
+    const payload = payloadOf(built(repo).html);
+    const byLabel = (label) => payload.graph.nodes.find((node) => node.group === 'symbol' && node.label === label);
+    const owner = byLabel('OrderService');
+    const method = byLabel('Load7');
+    assert.ok(owner && method, 'the class or its method is missing from the graph');
+
+    const declares = payload.graph.links.filter((link) => link.kind === 'DECLARES' && link.target === method.id);
+    assert.deepEqual(declares.map((link) => link.source), [owner.id], 'the method is not held by its class');
+
+    // The class is cut between its methods, so later chunks are about methods
+    // only; the class still answers for them.
+    const aboutClassOnly = (payload.graph.relations.about[owner.id] ?? []).length;
+    assert.ok(relatedCount(payload, owner) > aboutClassOnly, 'clicking the class ignores its methods');
   } finally {
     repo.cleanup();
   }

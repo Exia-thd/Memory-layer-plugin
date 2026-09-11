@@ -121,7 +121,8 @@ const USAGE = `dai-memory - project memory layer
   dai-memory changes [--scope S] [--base R]  what memory records about your changed files
   dai-memory map [path] [--format tree|mermaid]  the code graph: files, declarations, memory
   dai-memory prune [--older-than 90] [--dry-run]  forget old, unreferenced episodic memories
-  dai-memory ui [path] [--out FILE]       build a browser view of the graph and the store
+  dai-memory ui [path] [--out FILE] [--max-nodes N]
+                                          build a browser view of the graph and the store
   dai-memory session start <label> | end [--summary S] | (none)   open, close or show the session
   dai-memory summarize <clusterId> --body S   record a summary for a group of memories
   dai-memory conflicts [--json]           contradictions needing a person
@@ -305,6 +306,11 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
       if (!args.flags.quiet) emit(args, report, () =>
         `ingested ${report.files} files (${report.skipped} unchanged) -> ` +
         `${report.created} new, ${report.refreshed} refreshed, ${report.embedded} embedded` +
+        // What the files stopped producing. Counted all along and never printed,
+        // so replacing 4,729 stale chunks read exactly like adding nothing.
+        (report.removed > 0 ? `, ${report.removed} removed` : '') +
+        (report.superseded > 0 ? `, ${report.superseded} superseded` : '') +
+        (report.symbols > 0 ? `\ncode graph: ${report.symbols} declaration(s) recorded` : '') +
         (report.vanished > 0 ? `
 reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         (report.symbolsRemoved > 0
@@ -624,7 +630,11 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
 
     case 'ui': {
       const { runUi } = await import('./ui.js');
-      const built = await runUi({ prefix: args.positional[0], out: stringFlag(args, 'out') });
+      const maxNodes = numberFlag(args, 'max-nodes');
+      if (maxNodes !== undefined && (!Number.isInteger(maxNodes) || maxNodes < 1)) {
+        throw new Error(`--max-nodes expects a whole number of nodes, got ${maxNodes}`);
+      }
+      const built = await runUi({ prefix: args.positional[0], out: stringFlag(args, 'out'), maxNodes });
       emit(args, built, () =>
         `${built.file}\n${built.nodes} nodes${built.truncated ? ' (trimmed -- narrow it with a path)' : ''}` +
         '\nA snapshot: re-run after changing the store. Open it in a browser.',

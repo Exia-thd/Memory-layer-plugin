@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import v8 from 'node:v8';
 import { log } from '../util/log.js';
 
 const require = createRequire(import.meta.url);
@@ -17,20 +19,88 @@ export interface LanguageRule {
   label: string;
   grammar: string | null;
   mode: ChunkMode;
-  /** Node types that mark a chunk boundary. */
+  /** Node types that mark a chunk boundary, among the top-level nodes. */
   boundaries: string[];
+  /**
+   * Node types recorded as declarations, found at any depth.
+   *
+   * Separate from `boundaries` because the two questions differ: where to cut a
+   * file into chunks is a top-level decision, but what a file declares includes
+   * every method inside every class. Using one list for both is how methods
+   * were never recorded in any language -- they live inside class bodies, and
+   * the walk only ever looked at the top.
+   */
+  symbols?: string[];
+  /**
+   * Symbol types that count only directly under the file or an export wrapper.
+   *
+   * `const x = ...` names something at module scope and nothing worth keeping
+   * inside a function body. Walking into every function would record every
+   * local variable in the repository.
+   */
+  topLevelOnly?: string[];
+  /**
+   * Symbol types that bind a value rather than open a scope: recorded at file,
+   * module or type level, skipped inside a function body or another value.
+   *
+   * Looser than `topLevelOnly`, for languages where members are bindings too:
+   * a Kotlin property, an OCaml `let` inside a module, a Zig `const` that
+   * holds a struct. `val local = 1` inside a function is the same node type as
+   * the property, and recording it would put every local in the graph.
+   */
+  variables?: string[];
+  /**
+   * Node types the chunker looks through rather than treating as one unit.
+   *
+   * A C# file is usually one namespace wrapping everything; without looking
+   * through it the whole file is a single top-level node, and a single chunk.
+   */
+  containers?: string[];
+  /** Pack adjacent small boundaries into one chunk, for data formats. */
+  pack?: boolean;
+  /** The grammar file ships in this package's `grammars/`, not in tree-sitter-wasms. */
+  vendored?: boolean;
 }
 
+/**
+ * Every node type below was measured by parsing a sample with the grammar that
+ * ships in `tree-sitter-wasms`, not written from memory. A remembered node name
+ * that does not exist in the grammar produces a language that looks supported,
+ * parses without error, and records nothing -- which is how Java's
+ * `method_declaration` sat in this table for months without ever firing.
+ */
 const RULES: Record<string, LanguageRule> = {
   typescript: {
     label: 'typescript',
     grammar: 'tree-sitter-typescript.wasm',
     mode: 'AST_DECLARATION',
     boundaries: [
-      'function_declaration', 'class_declaration', 'method_definition',
+      'function_declaration', 'class_declaration', 'abstract_class_declaration', 'method_definition',
       'interface_declaration', 'type_alias_declaration', 'enum_declaration',
-      'lexical_declaration', 'export_statement',
+      'lexical_declaration', 'export_statement', 'internal_module',
     ],
+    symbols: [
+      'class_declaration', 'abstract_class_declaration', 'interface_declaration',
+      'type_alias_declaration', 'enum_declaration', 'function_declaration',
+      'method_definition', 'abstract_method_signature', 'internal_module', 'lexical_declaration',
+    ],
+    topLevelOnly: ['lexical_declaration'],
+  },
+  tsx: {
+    label: 'tsx',
+    grammar: 'tree-sitter-tsx.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: [
+      'function_declaration', 'class_declaration', 'abstract_class_declaration', 'method_definition',
+      'interface_declaration', 'type_alias_declaration', 'enum_declaration',
+      'lexical_declaration', 'export_statement', 'internal_module',
+    ],
+    symbols: [
+      'class_declaration', 'abstract_class_declaration', 'interface_declaration',
+      'type_alias_declaration', 'enum_declaration', 'function_declaration',
+      'method_definition', 'abstract_method_signature', 'internal_module', 'lexical_declaration',
+    ],
+    topLevelOnly: ['lexical_declaration'],
   },
   javascript: {
     label: 'javascript',
@@ -40,44 +110,388 @@ const RULES: Record<string, LanguageRule> = {
       'function_declaration', 'class_declaration', 'method_definition',
       'lexical_declaration', 'export_statement',
     ],
+    symbols: ['class_declaration', 'function_declaration', 'method_definition', 'lexical_declaration'],
+    topLevelOnly: ['lexical_declaration'],
   },
   python: {
     label: 'python',
     grammar: 'tree-sitter-python.wasm',
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition', 'class_definition', 'decorated_definition'],
+    symbols: ['class_definition', 'function_definition'],
   },
   go: {
     label: 'go',
     grammar: 'tree-sitter-go.wasm',
     mode: 'AST_DECLARATION',
     boundaries: ['function_declaration', 'method_declaration', 'type_declaration'],
+    symbols: ['function_declaration', 'method_declaration', 'type_spec', 'method_spec'],
   },
   rust: {
     label: 'rust',
     grammar: 'tree-sitter-rust.wasm',
     mode: 'AST_DECLARATION',
-    boundaries: ['function_item', 'struct_item', 'impl_item', 'trait_item', 'enum_item'],
+    boundaries: [
+      'function_item', 'struct_item', 'impl_item', 'trait_item', 'enum_item',
+      'mod_item', 'macro_definition', 'type_item', 'const_item',
+    ],
+    symbols: [
+      'function_item', 'function_signature_item', 'struct_item', 'enum_item', 'trait_item',
+      'mod_item', 'type_item', 'const_item', 'macro_definition',
+    ],
   },
   java: {
     label: 'java',
     grammar: 'tree-sitter-java.wasm',
     mode: 'AST_DECLARATION',
-    boundaries: ['class_declaration', 'method_declaration', 'interface_declaration'],
+    boundaries: [
+      'class_declaration', 'interface_declaration', 'record_declaration',
+      'enum_declaration', 'annotation_type_declaration',
+    ],
+    symbols: [
+      'class_declaration', 'interface_declaration', 'record_declaration', 'enum_declaration',
+      'annotation_type_declaration', 'method_declaration', 'constructor_declaration',
+    ],
+  },
+  c_sharp: {
+    label: 'c_sharp',
+    grammar: 'tree-sitter-c_sharp.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: [
+      'class_declaration', 'interface_declaration', 'record_declaration',
+      'struct_declaration', 'enum_declaration', 'delegate_declaration',
+    ],
+    symbols: [
+      'class_declaration', 'interface_declaration', 'record_declaration', 'struct_declaration',
+      'enum_declaration', 'delegate_declaration', 'method_declaration',
+      'constructor_declaration', 'property_declaration',
+    ],
+    // Everything in a C# file sits inside a namespace -- block-scoped or, since
+    // C# 10, file-scoped. Not looked through, the namespace is the file's only
+    // top-level node, and the whole file is one unit.
+    containers: ['namespace_declaration', 'file_scoped_namespace_declaration', 'declaration_list'],
+  },
+  kotlin: {
+    label: 'kotlin',
+    grammar: 'tree-sitter-kotlin.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['class_declaration', 'object_declaration', 'function_declaration'],
+    symbols: ['class_declaration', 'object_declaration', 'function_declaration', 'property_declaration'],
+    variables: ['property_declaration'],
+  },
+  scala: {
+    label: 'scala',
+    grammar: 'tree-sitter-scala.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['class_definition', 'trait_definition', 'object_definition', 'function_definition'],
+    symbols: [
+      'class_definition', 'trait_definition', 'object_definition',
+      'function_definition', 'function_declaration',
+    ],
+  },
+  swift: {
+    label: 'swift',
+    grammar: 'tree-sitter-swift.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['class_declaration', 'protocol_declaration', 'function_declaration'],
+    symbols: [
+      'class_declaration', 'protocol_declaration', 'function_declaration',
+      'protocol_function_declaration', 'init_declaration', 'property_declaration',
+      'typealias_declaration',
+    ],
+    variables: ['property_declaration'],
+  },
+  dart: {
+    label: 'dart',
+    grammar: 'tree-sitter-dart.wasm',
+    mode: 'AST_DECLARATION',
+    // A top-level Dart function is a signature followed by a sibling body, so
+    // it is left as filler and the two stay in one chunk; its name is still
+    // recorded through `symbols`.
+    boundaries: ['class_definition', 'mixin_declaration', 'enum_declaration', 'extension_declaration'],
+    symbols: [
+      'class_definition', 'mixin_declaration', 'enum_declaration', 'extension_declaration',
+      'function_signature', 'constructor_signature',
+    ],
+  },
+  php: {
+    label: 'php',
+    grammar: 'tree-sitter-php.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: [
+      'class_declaration', 'interface_declaration', 'trait_declaration',
+      'enum_declaration', 'function_definition',
+    ],
+    symbols: [
+      'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration',
+      'function_definition', 'method_declaration',
+    ],
+    containers: ['namespace_definition', 'compound_statement'],
+  },
+  ruby: {
+    label: 'ruby',
+    grammar: 'tree-sitter-ruby.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['class', 'method', 'singleton_method'],
+    symbols: ['module', 'class', 'method', 'singleton_method'],
+    containers: ['module', 'body_statement'],
+  },
+  c: {
+    label: 'c',
+    grammar: 'tree-sitter-c.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+    symbols: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+  },
+  cpp: {
+    label: 'cpp',
+    grammar: 'tree-sitter-cpp.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_definition', 'class_specifier', 'struct_specifier', 'enum_specifier', 'union_specifier'],
+    symbols: ['function_definition', 'class_specifier', 'struct_specifier', 'enum_specifier', 'union_specifier'],
+    containers: ['namespace_definition', 'declaration_list', 'template_declaration', 'linkage_specification'],
+  },
+  objc: {
+    label: 'objc',
+    grammar: 'tree-sitter-objc.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['class_interface', 'class_implementation', 'protocol_declaration', 'function_definition'],
+    symbols: [
+      'class_interface', 'class_implementation', 'protocol_declaration',
+      'method_declaration', 'method_definition', 'function_definition',
+    ],
+  },
+  // Vendored too. The Lua grammar in tree-sitter-wasms parses correctly only
+  // the first time in a runtime: the second parse of the same source, with a
+  // fresh parser, comes back with ERROR nodes -- so in an ingest only the
+  // first Lua file was read. The maintained grammar has no such state.
+  lua: {
+    label: 'lua',
+    grammar: 'tree-sitter-lua.wasm',
+    vendored: true,
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_declaration'],
+    symbols: ['function_declaration'],
+  },
+  bash: {
+    label: 'bash',
+    grammar: 'tree-sitter-bash.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_definition'],
+    symbols: ['function_definition'],
+  },
+  elixir: {
+    label: 'elixir',
+    grammar: 'tree-sitter-elixir.wasm',
+    mode: 'AST_DECLARATION',
+    // Elixir has no declaration syntax: `defmodule` and `def` are ordinary
+    // calls, so a `call` is a symbol only when its target is one of them. The
+    // chunker's name resolver knows the shape.
+    boundaries: ['call'],
+    symbols: ['call'],
+    containers: ['do_block'],
+  },
+  ocaml: {
+    label: 'ocaml',
+    grammar: 'tree-sitter-ocaml.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['module_definition', 'type_definition', 'value_definition', 'module_type_definition'],
+    symbols: ['module_binding', 'type_binding', 'module_type_definition', 'let_binding'],
+    variables: ['let_binding'],
+  },
+  zig: {
+    label: 'zig',
+    grammar: 'tree-sitter-zig.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_declaration', 'variable_declaration'],
+    symbols: ['function_declaration', 'variable_declaration'],
+    variables: ['variable_declaration'],
+  },
+  solidity: {
+    label: 'solidity',
+    grammar: 'tree-sitter-solidity.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['contract_declaration', 'interface_declaration', 'library_declaration'],
+    symbols: [
+      'contract_declaration', 'interface_declaration', 'library_declaration',
+      'function_definition', 'event_definition', 'modifier_definition', 'struct_declaration',
+    ],
+  },
+  rescript: {
+    label: 'rescript',
+    grammar: 'tree-sitter-rescript.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['type_declaration', 'module_declaration', 'let_declaration'],
+    symbols: ['type_binding', 'module_binding', 'let_binding'],
+    variables: ['let_binding'],
+  },
+  elisp: {
+    label: 'elisp',
+    grammar: 'tree-sitter-elisp.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['function_definition', 'macro_definition'],
+    symbols: ['function_definition', 'macro_definition'],
+  },
+  systemrdl: {
+    label: 'systemrdl',
+    grammar: 'tree-sitter-systemrdl.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['component_def'],
+    symbols: ['component_named_def'],
+    containers: ['description'],
+  },
+  tlaplus: {
+    label: 'tlaplus',
+    grammar: 'tree-sitter-tlaplus.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['operator_definition'],
+    symbols: ['module', 'operator_definition'],
+    containers: ['module'],
+  },
+  // Vue's grammar sees <template>, <script> and <style>; the script body is
+  // opaque text to it. The chunker re-parses that text with the JavaScript or
+  // TypeScript grammar, which is where the component's names actually are.
+  vue: {
+    label: 'vue',
+    grammar: 'tree-sitter-vue.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['template_element', 'script_element', 'style_element'],
+    symbols: [],
+  },
+  // Data and markup. There is nothing here that "declares" in the sense a code
+  // graph means, so they record no symbols -- but the grammar still knows where
+  // one rule, table or top-level key ends, which is a better cut than a
+  // character count landing mid-block. Small neighbours are packed together so
+  // a package.json does not become thirty one-line chunks.
+  css: {
+    label: 'css',
+    grammar: 'tree-sitter-css.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['rule_set', 'media_statement', 'keyframes_statement', 'supports_statement', 'at_rule'],
+    pack: true,
+  },
+  html: {
+    label: 'html',
+    grammar: 'tree-sitter-html.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['element', 'script_element', 'style_element'],
+    containers: ['document'],
+    pack: true,
+  },
+  json: {
+    label: 'json',
+    grammar: 'tree-sitter-json.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['pair'],
+    containers: ['document', 'object'],
+    pack: true,
+  },
+  toml: {
+    label: 'toml',
+    grammar: 'tree-sitter-toml.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['table', 'table_array_element', 'pair'],
+    pack: true,
+  },
+  embedded_template: {
+    label: 'embedded_template',
+    grammar: 'tree-sitter-embedded_template.wasm',
+    mode: 'AST_DECLARATION',
+    boundaries: ['directive', 'output_directive', 'content'],
+    pack: true,
+  },
+  // The next three load from `grammars/` in this package, not from
+  // tree-sitter-wasms: its builds of them cannot be loaded by any current
+  // runtime (Elm is ABI 12, QL ABI 10, YAML calls a scanner symbol nothing
+  // exports). The vendored files come from each grammar's own repository; the
+  // README there records source, commit and checksum.
+  elm: {
+    label: 'elm',
+    grammar: 'tree-sitter-elm.wasm',
+    vendored: true,
+    mode: 'AST_DECLARATION',
+    // A type annotation is filler, so it rides along with the value it annotates.
+    boundaries: ['type_declaration', 'type_alias_declaration', 'value_declaration', 'port_annotation'],
+    symbols: [
+      'module_declaration', 'type_declaration', 'type_alias_declaration',
+      'value_declaration', 'port_annotation',
+    ],
+    variables: ['value_declaration'],
+  },
+  ql: {
+    label: 'ql',
+    grammar: 'tree-sitter-ql.wasm',
+    vendored: true,
+    mode: 'AST_DECLARATION',
+    boundaries: ['module', 'dataclass', 'classlessPredicate', 'select'],
+    symbols: ['module', 'dataclass', 'classlessPredicate', 'memberPredicate'],
+    containers: ['moduleMember'],
+  },
+  yaml: {
+    label: 'yaml',
+    grammar: 'tree-sitter-yaml.wasm',
+    vendored: true,
+    mode: 'AST_DECLARATION',
+    boundaries: ['block_mapping_pair', 'block_sequence_item'],
+    containers: ['stream', 'document', 'block_node', 'block_mapping', 'block_sequence'],
+    pack: true,
   },
   markdown: { label: 'markdown', grammar: null, mode: 'MARKDOWN_HEADING', boundaries: [] },
   text: { label: 'text', grammar: null, mode: 'CHARACTER', boundaries: [] },
 };
 
 const BY_EXTENSION: Record<string, string> = {
-  '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
+  '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
+  // TSX needs its own grammar: the TypeScript one cannot read JSX, so `.tsx`
+  // mapped to it parsed every component into an error node.
+  '.tsx': 'tsx',
   '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-  '.py': 'python',
+  '.py': 'python', '.pyi': 'python',
   '.go': 'go',
   '.rs': 'rust',
   '.java': 'java',
+  '.cs': 'c_sharp', '.csx': 'c_sharp',
+  '.kt': 'kotlin', '.kts': 'kotlin',
+  '.scala': 'scala', '.sc': 'scala',
+  '.swift': 'swift',
+  '.dart': 'dart',
+  '.php': 'php', '.phtml': 'php',
+  '.rb': 'ruby', '.rake': 'ruby', '.gemspec': 'ruby',
+  '.c': 'c', '.h': 'c',
+  '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.c++': 'cpp',
+  '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp', '.h++': 'cpp',
+  '.m': 'objc', '.mm': 'objc',
+  '.lua': 'lua',
+  '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
+  '.ex': 'elixir', '.exs': 'elixir',
+  '.ml': 'ocaml', '.mli': 'ocaml',
+  '.zig': 'zig',
+  '.sol': 'solidity',
+  '.res': 'rescript', '.resi': 'rescript',
+  '.el': 'elisp',
+  '.rdl': 'systemrdl',
+  '.tla': 'tlaplus',
+  '.vue': 'vue',
+  '.css': 'css',
+  '.html': 'html', '.htm': 'html',
+  '.json': 'json',
+  '.toml': 'toml',
+  '.erb': 'embedded_template', '.ejs': 'embedded_template',
+  '.elm': 'elm',
+  '.ql': 'ql', '.qll': 'ql',
+  '.yaml': 'yaml', '.yml': 'yaml',
   '.md': 'markdown', '.markdown': 'markdown', '.mdx': 'markdown',
 };
+
+/** The rule for a label, for callers that already know the language. */
+export function ruleFor(label: string): LanguageRule | null {
+  return RULES[label] ?? null;
+}
+
+/** Every language with a grammar, for the capability report. */
+export function astLanguages(): string[] {
+  return Object.values(RULES).filter((rule) => rule.grammar).map((rule) => rule.label);
+}
 
 export function ruleForFile(filePath: string): LanguageRule {
   const label = BY_EXTENSION[path.extname(filePath).toLowerCase()];
@@ -93,10 +507,18 @@ interface TreeSitterModule {
 export interface TreeSitterParser {
   setLanguage(language: unknown): void;
   parse(source: string): unknown;
+  delete?: () => void;
 }
 
-let runtime: Promise<TreeSitterModule | null> | null = null;
-const grammars = new Map<string, unknown>();
+/** A grammar and the runtime instance it was loaded into. They only work together. */
+interface LoadedGrammar {
+  Parser: TreeSitterModule['Parser'];
+  language: unknown;
+}
+
+const grammars = new Map<string, Promise<LoadedGrammar | null>>();
+/** Set once web-tree-sitter has failed; every later load returns null quietly. */
+let runtimeFailure: string | null = null;
 
 function grammarDir(): string | null {
   try {
@@ -107,106 +529,163 @@ function grammarDir(): string | null {
 }
 
 /**
- * Loads and initialises web-tree-sitter once, normalising its export shape.
+ * Keeps grammar code on V8's baseline compiler.
  *
- * The module is required exactly here. Calling require() again after init()
- * returns a different object -- one without the constructor -- so a second call
- * site silently loses the ability to build a parser while still being able to
- * load grammars.
+ * Grammars are enormous straight-line functions -- a lexer is one switch with
+ * thousands of cases, a start-up function applies one relocation per pointer
+ * in the parse tables. Once hot, V8 hands them to its optimising compiler,
+ * which needs hundreds of megabytes each. Measured on the default settings:
+ * four grammars cost 401 MB, thirteen 673 MB, and the twenty-fourth killed the
+ * process with "Fatal process out of memory: Zone" -- an abort, not an
+ * exception, so there is nothing to catch and nothing to fall back to.
+ *
+ * Raising the tiering budget only moved the crash: budgets of 1e8 to 2e9 all
+ * still died, later the larger they were, because parsing spends the budget.
+ * The filter below is checked at the moment of tier-up, so it holds however
+ * long the process parses. Nothing is re-optimised; parsing is about 1.65x
+ * slower (400 C# classes: 535 ms to 900 ms per 40 parses), small next to
+ * embedding. The flag is process-wide, but nothing else in this process runs
+ * WebAssembly -- the embedder is ONNX Runtime's native build -- and it changes
+ * only how fast code runs, never what it computes.
  */
-async function treeSitter(): Promise<TreeSitterModule | null> {
-  runtime ??= (async () => {
-    // An operator switch, and the seam the capability probe is tested through.
-    if (process.env.MEMORY_LAYER_DISABLE_AST === '1') {
-      log('info', 'AST chunking disabled by MEMORY_LAYER_DISABLE_AST=1');
-      return null;
-    }
-
-    let module: Record<string, unknown>;
-    try {
-      module = require('web-tree-sitter') as Record<string, unknown>;
-    } catch (err) {
-      log('warn', 'web-tree-sitter unavailable; chunking falls back to character windows', err);
-      return null;
-    }
-
-    try {
-      // Older builds export the Parser class directly; newer ones export a
-      // namespace holding it. Both are accepted so the pin can move.
-      const asParser = typeof module === 'function' ? (module as unknown as TreeSitterModule) : null;
-      const init = (asParser ?? (module as unknown as TreeSitterModule)).init;
-      await init.call(asParser ?? module);
-
-      const Parser = (asParser ?? (module.Parser as TreeSitterModule['Parser'])) as TreeSitterModule['Parser'];
-      const Language =
-        ((asParser as unknown as TreeSitterModule)?.Language ??
-          (module.Language as TreeSitterModule['Language']));
-
-      if (typeof Parser !== 'function' || !Language) {
-        log('warn', 'web-tree-sitter exports an unexpected shape; falling back to character chunking');
-        return null;
-      }
-      return { init, Language, Parser } as TreeSitterModule;
-    } catch (err) {
-      log('warn', 'web-tree-sitter failed to initialise', err);
-      return null;
-    }
-  })();
-
-  return runtime;
+let tieringCapped = false;
+function capTiering(): void {
+  if (tieringCapped) return;
+  tieringCapped = true;
+  try {
+    // "Only tier up the function with this index": an index no module has.
+    v8.setFlagsFromString('--wasm-tier-up-filter=2147483647');
+  } catch (err) {
+    log('warn', 'could not stop WebAssembly tier-up; loading many grammars may exhaust memory', err);
+  }
 }
 
 /**
- * Loads a grammar, returning null when it is unavailable.
+ * A fresh web-tree-sitter runtime, one per grammar.
+ *
+ * Grammars are linked into the runtime that loads them, and the old grammars
+ * this package ships export helper functions under the same names. Loaded into
+ * one shared runtime, a later grammar's scanner calls an earlier grammar's
+ * helper: PHP loaded before Lua made Lua parse `function charge() end` into
+ * ERROR nodes, so Lua files silently lost declarations -- only in a repository
+ * that also had PHP, and only depending on which file came first. A runtime of
+ * its own gives each grammar its own symbol table.
+ *
+ * The module is evaluated afresh for each, by dropping it from the require
+ * cache; nothing else in this process holds on to it.
+ */
+async function freshRuntime(): Promise<{ Parser: TreeSitterModule['Parser']; Language: TreeSitterModule['Language'] } | null> {
+  if (runtimeFailure !== null) return null;
+
+  // An operator switch, and the seam the capability probe is tested through.
+  if (process.env.MEMORY_LAYER_DISABLE_AST === '1') {
+    runtimeFailure = 'disabled';
+    log('info', 'AST chunking disabled by MEMORY_LAYER_DISABLE_AST=1');
+    return null;
+  }
+
+  let module: Record<string, unknown>;
+  try {
+    const entry = require.resolve('web-tree-sitter');
+    delete require.cache[entry];
+    module = require(entry) as Record<string, unknown>;
+  } catch (err) {
+    runtimeFailure = 'unavailable';
+    log('warn', 'web-tree-sitter unavailable; chunking falls back to character windows', err);
+    return null;
+  }
+
+  try {
+    // Three export shapes, all accepted so the pin can move. 0.22 and older
+    // export the Parser class directly with `init` on it. 0.24 exports a
+    // namespace with a top-level `init`. 0.25 exports a namespace too, but
+    // `init` moved onto `Parser` as a static -- and code that only knew the
+    // 0.24 shape called `undefined.call`, caught the TypeError, and turned AST
+    // chunking off with nothing but a log line. Upgrading the runtime would
+    // have silently downgraded every language to character windows.
+    const asParser = typeof module === 'function' ? (module as unknown as TreeSitterModule) : null;
+    const namespaceParser = module.Parser as (TreeSitterModule['Parser'] & { init?: () => Promise<void> }) | undefined;
+    const owner = asParser ?? (typeof module.init === 'function' ? module : namespaceParser);
+    const init = (owner as { init?: () => Promise<void> } | undefined)?.init;
+    if (typeof init !== 'function') {
+      runtimeFailure = 'shape';
+      log('warn', 'web-tree-sitter exposes no init(); falling back to character chunking');
+      return null;
+    }
+    await init.call(owner);
+
+    const Parser = (asParser ?? namespaceParser) as TreeSitterModule['Parser'];
+    const Language =
+      ((asParser as unknown as TreeSitterModule)?.Language ??
+        (module.Language as TreeSitterModule['Language']));
+
+    if (typeof Parser !== 'function' || !Language) {
+      runtimeFailure = 'shape';
+      log('warn', 'web-tree-sitter exports an unexpected shape; falling back to character chunking');
+      return null;
+    }
+    return { Parser, Language };
+  } catch (err) {
+    runtimeFailure = 'init';
+    log('warn', 'web-tree-sitter failed to initialise', err);
+    return null;
+  }
+}
+
+/**
+ * Loads a grammar into a runtime of its own, returning null when it is unavailable.
  *
  * Null is a normal answer, not an error: the chunker falls back to character
  * windows, so a missing or broken grammar costs chunk quality and nothing else.
  */
-export async function loadGrammar(rule: LanguageRule): Promise<unknown | null> {
-  if (!rule.grammar) return null;
-  if (grammars.has(rule.label)) return grammars.get(rule.label) ?? null;
-
-  const ts = await treeSitter();
-  if (!ts) {
-    grammars.set(rule.label, null);
-    return null;
+function loadGrammar(rule: LanguageRule): Promise<LoadedGrammar | null> {
+  if (!rule.grammar) return Promise.resolve(null);
+  let pending = grammars.get(rule.label);
+  if (!pending) {
+    pending = loadGrammarUncached(rule, rule.grammar);
+    grammars.set(rule.label, pending);
   }
+  return pending;
+}
 
-  const dir = grammarDir();
+async function loadGrammarUncached(rule: LanguageRule, grammar: string): Promise<LoadedGrammar | null> {
+  // dist/ingest/languages.js -> <package>/grammars
+  const dir = rule.vendored ? fileURLToPath(new URL('../../grammars', import.meta.url)) : grammarDir();
   if (!dir) {
     log('warn', 'tree-sitter-wasms not resolvable; chunking falls back to character windows');
-    grammars.set(rule.label, null);
     return null;
   }
-
-  const file = path.join(dir, rule.grammar);
+  const file = path.join(dir, grammar);
   if (!fs.existsSync(file)) {
     log('warn', `grammar missing: ${file}`);
-    grammars.set(rule.label, null);
     return null;
   }
 
+  capTiering();
+  const runtime = await freshRuntime();
+  if (!runtime) return null;
+
   try {
-    const language = await ts.Language.load(file);
-    grammars.set(rule.label, language);
-    return language;
+    const language = await runtime.Language.load(file);
+    return { Parser: runtime.Parser, language };
   } catch (err) {
     log('warn', `failed to load grammar ${rule.label}`, err);
-    grammars.set(rule.label, null);
     return null;
   }
 }
 
+/**
+ * A new parser for a language, or null. The caller owns it and should call
+ * `delete()` when done: it lives in WebAssembly memory the garbage collector
+ * cannot see.
+ */
 export async function newParser(rule: LanguageRule): Promise<TreeSitterParser | null> {
-  const language = await loadGrammar(rule);
-  if (!language) return null;
-
-  const ts = await treeSitter();
-  if (!ts) return null;
+  const loaded = await loadGrammar(rule);
+  if (!loaded) return null;
 
   try {
-    const parser = new ts.Parser();
-    parser.setLanguage(language);
+    const parser = new loaded.Parser();
+    parser.setLanguage(loaded.language);
     return parser;
   } catch (err) {
     log('warn', `failed to construct parser for ${rule.label}`, err);
@@ -225,7 +704,14 @@ export async function newParser(rule: LanguageRule): Promise<TreeSitterParser | 
 export async function isLanguageAvailable(label: string): Promise<boolean> {
   const rule = RULES[label];
   if (!rule || !rule.grammar) return false;
-  return (await newParser(rule)) !== null;
+  const wasLoaded = grammars.has(rule.label);
+  const parser = await newParser(rule);
+  parser?.delete?.();
+  // A grammar loaded only to answer this question is let go again. `doctor`
+  // asks about all of them, and a long-lived process that runs it should not
+  // keep thirty-six runtimes for the languages its repository never uses.
+  if (!wasLoaded) grammars.delete(rule.label);
+  return parser !== null;
 }
 
 /**

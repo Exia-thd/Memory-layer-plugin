@@ -16,7 +16,10 @@ export interface StoreMeta {
   capabilities?: Capabilities;
   /** Monotonic counter; a read-only handle uses it to detect its snapshot is old. */
   writeSeq: number;
-  /** content hash per ingested file, so a second ingest only touches what moved. */
+  /**
+   * Per ingested file, `<chunker version>:<content hash>`, so a second ingest
+   * only touches what moved -- or what an older reader read.
+   */
   fileHashes?: Record<string, string>;
   /**
    * Which tokenizer built the postings. Indexing and querying must agree, so a

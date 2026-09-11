@@ -22,6 +22,12 @@ export interface UiPayload {
   graph: {
     nodes: Array<{ id: string; label: string; kind: string; group: string; detail?: string }>;
     links: Array<{ source: string; target: string; kind: string }>;
+    /**
+     * Every declaration's relations, whether or not the budget drew it:
+     * `owner` maps a declaration to what encloses it (a declaration or
+     * `file:<path>`), `about` to the memories about it.
+     */
+    relations: { owner: Record<string, string>; about: Record<string, string[]> };
   };
   memories: Array<{
     id: string;
@@ -34,7 +40,8 @@ export interface UiPayload {
     edges: number;
     contested: boolean;
   }>;
-  truncated: { nodes: number } | null;
+  /** Set when the graph was cut to its node budget: how many there were, and what was left out. */
+  truncated: { nodes: number; omitted?: Record<string, number> } | null;
 }
 
 export function renderUi(payload: UiPayload): string {
@@ -203,7 +210,7 @@ export function renderUi(payload: UiPayload): string {
       <h2>The 3D view could not load</h2>
       <p>It is fetched from a CDN, so this page needs a network the first time it
         is opened. The other tabs work regardless — they carry their data inline.</p>
-      <p>For a diagram that needs nothing at all: <code>memory map --format mermaid</code></p>
+      <p>For a diagram that needs nothing at all: <code>dai-memory map --format mermaid</code></p>
     </div>
   </section>
 
@@ -242,9 +249,9 @@ export function renderUi(payload: UiPayload): string {
       This page is read-only. Every write in this system is a short-lived process,
       which is what lets several sessions run at once without fighting over the
       store — a page holding a write connection would break that. To change
-      something, run the command: <code>memory prune</code>,
-      <code>memory ingest --force</code>, <code>memory embed --force</code>,
-      <code>memory merge</code>. Re-run <code>memory ui</code> afterwards; this
+      something, run the command: <code>dai-memory prune</code>,
+      <code>dai-memory ingest --force</code>, <code>dai-memory embed --force</code>,
+      <code>dai-memory merge</code>. Re-run <code>dai-memory ui</code> afterwards; this
       file is a snapshot, not a live view.
     </p>
   </section>
@@ -356,26 +363,39 @@ export function renderUi(payload: UiPayload): string {
    * replaces link endpoints with node objects once it has run, so link.source is
    * a string here and an object in there.
    */
+  /** owner -> the declarations it encloses, built once from the full relations. */
+  var enclosed = null;
+
   function relatedMemories(node) {
-    var links = data.graph.links;
     var direct = data.memories.find(function (m) { return m.id === node.id; });
     if (direct) return [direct];
 
     var wanted = {};
 
-    if (node.group === 'symbol') {
-      links.forEach(function (link) {
-        if (link.kind === 'ABOUT' && link.target === node.id) wanted[link.source] = true;
-      });
-    } else if (node.group === 'file') {
-      var declared = {};
-      links.forEach(function (link) {
-        if (link.kind === 'DECLARES' && link.source === node.id) declared[link.target] = true;
-      });
-      links.forEach(function (link) {
-        if (link.kind === 'ABOUT' && declared[link.target]) wanted[link.source] = true;
-      });
+    if (node.group === 'symbol' || node.group === 'file') {
+      // Everything the node declares, however deep and whether or not it was
+      // drawn: a class answers for its methods too. Read from the relations,
+      // not the drawn links, which lose whatever the node budget left out.
+      var relations = data.graph.relations || { owner: {}, about: {} };
+      if (!enclosed) {
+        enclosed = {};
+        Object.keys(relations.owner).forEach(function (id) {
+          var owner = relations.owner[id];
+          (enclosed[owner] = enclosed[owner] || []).push(id);
+        });
+      }
+      var stack = [node.id];
+      var seen = {};
+      while (stack.length > 0) {
+        var id = stack.pop();
+        if (seen[id]) continue;
+        seen[id] = true;
+        (relations.about[id] || []).forEach(function (memoryId) { wanted[memoryId] = true; });
+        (enclosed[id] || []).forEach(function (child) { stack.push(child); });
+      }
+    }
 
+    if (node.group === 'file') {
       // Files whose content was chunked but which declare nothing -- markdown,
       // config, anything the grammar does not read -- still have memory against
       // the path itself.
@@ -525,8 +545,12 @@ export function renderUi(payload: UiPayload): string {
     var label = document.createElement('span'); label.textContent = 'snapshot';
     var state = document.createElement('span'); state.className = 'st warn'; state.textContent = 'WARN';
     var note = document.createElement('span');
-    note.textContent = 'Showing ' + data.graph.nodes.length + ' of ' + data.truncated.nodes +
-      ' nodes. Narrow it with a path: memory ui src/store';
+    var left = Object.keys(data.truncated.omitted || {})
+      .filter(function (kind) { return data.truncated.omitted[kind] > 0; })
+      .map(function (kind) { return data.truncated.omitted[kind] + ' ' + kind; });
+    note.textContent = 'Showing ' + data.graph.nodes.length + ' of ' + data.truncated.nodes + ' nodes' +
+      (left.length ? '; not drawn: ' + left.join(', ') : '') +
+      '. Everything is still in the Memories tab. Narrow the graph with a path: dai-memory ui src/store';
     warning.appendChild(label); warning.appendChild(state); warning.appendChild(note);
     health.appendChild(warning);
   }

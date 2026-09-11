@@ -120,7 +120,14 @@ test('R3-e: web-tree-sitter is required in exactly one place', () => {
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === 'dist') continue;
         walk(full);
-      } else if (entry.name.endsWith('.ts') && /require\(['"]web-tree-sitter['"]\)/.test(fs.readFileSync(full, 'utf8'))) {
+      } else if (
+        entry.name.endsWith('.ts') &&
+        // Every way of reaching the module: require(), require.resolve() -- the
+        // loader resolves once and evaluates a fresh copy per grammar -- and import.
+        /(require(\.resolve)?|import)\s*\(\s*['"]web-tree-sitter['"]\s*\)|from\s+['"]web-tree-sitter['"]/.test(
+          fs.readFileSync(full, 'utf8'),
+        )
+      ) {
         offenders.push(path.basename(full));
       }
     }

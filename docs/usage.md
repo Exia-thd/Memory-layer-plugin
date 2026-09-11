@@ -98,7 +98,7 @@ fts                ok      persisted-bm25
 vectorSearch       ok      exact-scan
 embeddings         ok      local
 tokenizer          ok      unicode-fold-v3
-astChunking        ok      web-tree-sitter -- 6 languages
+astChunking        ok      web-tree-sitter -- 36 languages
 ```
 
 `embeddings WARN hash` means the model did not load and search is running on a
@@ -114,6 +114,12 @@ dai-memory ingest
 
 Re-running is cheap. Content hashes mean an unchanged file is skipped, so a
 second pass over 47 files takes no time at all.
+
+"Unchanged" means the same content read by the same version of the code reader.
+After an upgrade that changes how code is read, the next `ingest` re-reads every
+file the older version read, and `doctor` says how many are waiting on its
+`code reader` line. Keyed on content alone, a repository indexed before its
+language had a code graph kept an empty graph forever, every file unchanged.
 
 ---
 
@@ -191,7 +197,7 @@ over the directory block list, and over the size guard.
 Every skip is printed with its reason and its way out:
 
 ```
-ingested 12 files (0 unchanged) -> 12 new, 12 embedded
+ingested 12 files (0 unchanged) -> 12 new, 0 refreshed, 12 embedded
 skipped 4:
    2 not text (.pdf .png)
       nothing to index; read it with an agent and record the conclusion
@@ -217,6 +223,27 @@ declared source becomes 7,494, because chunking cuts at declaration boundaries.
 A file that produces an outsized number of chunks is named in the report rather
 than refused, because a generated API client and a hand-written core module look
 identical from here and only you know which it is.
+
+### How code is read
+
+All 36 grammars that ship with the package are used; a test fails if the
+package gains one without a rule here.
+
+| Group | Languages | What is recorded |
+|---|---|---|
+| Declarations, at any depth | TypeScript, TSX, JavaScript, Python, Go, Rust, Java, C#, Kotlin, Scala, Swift, Dart, PHP, Ruby, C, C++, Objective-C, Lua, Bash, Elixir, OCaml, Zig, Solidity, ReScript, Emacs Lisp, SystemRDL, TLA+, Elm, CodeQL | Classes, methods, functions, types and module-level bindings, each named with what encloses it: `OrderService.Get`, not `Get` twice. Locals inside a function body are not recorded |
+| Re-parsed | Vue | The `<script>` block with the TypeScript or JavaScript grammar its `lang` asks for, `<style>` with CSS |
+| Structure only | CSS, HTML, JSON, TOML, YAML, ERB/EJS | No symbols -- nothing in them declares code -- but chunks are cut on rules, elements, keys and tables |
+
+A declaration too big for one chunk is cut between its members: a class between
+its methods, a JSON object between its keys, a CI file between its jobs. Only a
+single line with no structure left, such as a minified file, falls back to
+character windows. A language with no grammar is still indexed, as text.
+
+Four grammars -- Elm, CodeQL, YAML and Lua -- are loaded from
+`packages/core/grammars/` instead of `tree-sitter-wasms`, whose builds of them
+cannot be loaded or, for Lua, parse correctly only once per process. Where each
+file came from, and its checksum, is in that directory's README.
 
 ## The four things you will actually run
 
@@ -278,6 +305,7 @@ the filesystem.
 dai-memory ui                     # writes .memory/ui.html
 dai-memory ui src/store           # narrowed to a path
 dai-memory ui --out graph.html    # somewhere you can mail it
+dai-memory ui --max-nodes 4000    # draw more than the default 1500
 ```
 
 **When it appears:** `dai-memory init` writes it, and every `ingest` or `prune` that
@@ -298,10 +326,13 @@ you can see how old what you are looking at is.
 Three tabs: a 3D graph of files, declarations and the memory about them; the
 store as a filterable table; and the `doctor` report.
 
+Declarations hang off the declaration that encloses them: a file holds
+`OrderService`, and `OrderService` holds `Get`.
+
 Clicking any node in the graph opens what it is about — a declaration answers
-with the memory recorded against it, a file with everything its declarations
-carry plus anything recorded straight against the path. A click that finds
-nothing says so rather than doing nothing.
+with the memory recorded against it and everything it encloses, a file with
+everything its declarations carry plus anything recorded straight against the
+path. A click that finds nothing says so rather than doing nothing.
 
 Light by default. The toggle in the header switches to dark and remembers the
 choice; it does not follow the operating system, because that would hand a dark
@@ -319,8 +350,14 @@ showing an empty canvas — a blank graph reads as "there is nothing in here",
 which is a very different and much worse message. The other tabs work either
 way; their data is inline.
 
-Above 1500 nodes it keeps the most important and says how many it dropped.
-Narrow it with a path.
+Above 1500 nodes the graph is cut, in this order of what keeps its place:
+memories a person recorded, then files with their top-level declarations, then
+methods and properties, then chunks of the files. The cut is reported on the
+Health tab with a count per kind, and every memory is still listed on the
+Memories tab. Chunks go first because on a real repository there are thousands
+of them: when memories were kept first, 7,567 chunks took all 1,500 places and
+the graph showed not one file. Narrow it with a path, or raise the limit with
+`--max-nodes 4000` if your machine draws that many comfortably.
 
 ### `dai-memory doctor`
 

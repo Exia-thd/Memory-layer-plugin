@@ -14,11 +14,16 @@ import { renderUi, type UiPayload } from './ui-template.js';
  * once. A file you can mail to someone is worth more here than a localhost port.
  */
 
-/** Past this the browser starts to struggle and the picture stops being readable. */
+/**
+ * Past this the browser starts to struggle and the picture stops being readable.
+ * `--max-nodes` moves it for a machine that copes; a path narrows it instead.
+ */
 const MAX_GRAPH_NODES = 1500;
 
+type UiOptions = { from?: string; out?: string; prefix?: string; maxNodes?: number };
+
 export async function runUi(
-  options: { from?: string; out?: string; prefix?: string } = {},
+  options: UiOptions = {},
 ): Promise<{ file: string; nodes: number; truncated: boolean }> {
   const storeDir = storeDirOrThrow(options.from);
   const store = new MemoryStore(storeDir, { readOnly: true });
@@ -41,7 +46,7 @@ export async function runUi(
 export async function buildUi(
   store: MemoryStore,
   storeDir: string,
-  options: { from?: string; out?: string; prefix?: string } = {},
+  options: UiOptions = {},
 ): Promise<{ file: string; nodes: number; truncated: boolean }> {
   const project = resolveProject(options.from);
 
@@ -89,18 +94,10 @@ export async function buildUi(
       }))
       .sort((a, b) => b.importance - a.importance || a.ageDays - b.ageDays);
 
-    const graph = buildGraph(memories, allEdges, symbols);
-    const total = graph.nodes.length;
-    const truncated = total > MAX_GRAPH_NODES;
-
-    if (truncated) {
-      // Trimmed by importance, so what survives is what someone thought mattered.
-      // The page reports the cut; a silently shortened picture is a lie about the
-      // shape of the graph.
-      const keep = new Set(graph.nodes.slice(0, MAX_GRAPH_NODES).map((node) => node.id));
-      graph.nodes = graph.nodes.filter((node) => keep.has(node.id));
-      graph.links = graph.links.filter((link) => keep.has(link.source) && keep.has(link.target));
-    }
+    // The page reports any cut; a silently shortened picture is a lie about the
+    // shape of the graph.
+    const { graph, total, omitted } = buildGraph(memories, allEdges, symbols, options.maxNodes ?? MAX_GRAPH_NODES);
+    const truncated = total > graph.nodes.length;
 
     const payload: UiPayload = {
       project: project.name,
@@ -118,7 +115,7 @@ export async function buildUi(
       })),
       graph,
       memories,
-      truncated: truncated ? { nodes: total } : null,
+      truncated: truncated ? { nodes: total, omitted } : null,
     };
 
     const file = path.resolve(options.out ?? path.join(storeDir, 'ui.html'));
@@ -135,58 +132,125 @@ function matchesPrefix(node: MemoryNode, prefix?: string): boolean {
 }
 
 type Graph = UiPayload['graph'];
+type GraphNode = Graph['nodes'][number];
+type SymbolRow = {
+  id: string; name: string; filePath: string; kind: string; startLine: number; memories: Array<{ id: string }>;
+};
 
+/**
+ * The picture, within a node budget, and what the budget left out.
+ *
+ * Tiers claim the budget in order; the one the budget runs out in is cut
+ * part-way, in the order given, and the ones after it get nothing:
+ *
+ *   1. memories a person recorded -- decisions, constraints, what broke
+ *   2. files with what they declare at the top: classes, interfaces, functions
+ *   3. what those declare in turn: methods, properties
+ *   4. chunks of the files themselves
+ *
+ * The order used to be "memories first", which on a real repository meant
+ * 7,567 chunks took every one of the 1,500 places and not one file or
+ * declaration was drawn: a code graph page with no code graph on it. Chunks go
+ * last because they are the one kind the Memories tab lists in full anyway.
+ *
+ * A declaration hangs off the declaration that encloses it, not off the file,
+ * so the graph shows OrderService holding Get instead of a file holding both.
+ */
 function buildGraph(
   memories: UiPayload['memories'],
   edges: Array<{ from: string; to: string; type: string }>,
-  symbols: Array<{ id: string; name: string; filePath: string; kind: string; startLine: number; memories: Array<{ id: string }> }>,
-): Graph {
-  const nodes: Graph['nodes'] = [];
-  const links: Graph['links'] = [];
-  const present = new Set<string>();
+  symbols: SymbolRow[],
+  budget: number,
+): { graph: Graph; total: number; omitted: Record<string, number> } {
+  const recorded = memories.filter((memory) => memory.layer !== 'artifact');
+  const chunks = memories.filter((memory) => memory.layer === 'artifact');
+  const recordedIds = new Set(recorded.map((memory) => memory.id));
+  const symbolIds = new Set(symbols.map((symbol) => symbol.id));
 
-  const add = (node: Graph['nodes'][number]) => {
-    if (present.has(node.id)) return;
-    present.add(node.id);
-    nodes.push(node);
+  // `Symbol:<file>:<Outer.Inner>` -- the enclosing declaration is the prefix.
+  const parentOf = (symbol: SymbolRow): string | null => {
+    const qualified = symbol.id.slice(`Symbol:${symbol.filePath}:`.length);
+    const dot = qualified.lastIndexOf('.');
+    if (dot === -1) return null;
+    const parent = `Symbol:${symbol.filePath}:${qualified.slice(0, dot)}`;
+    return symbolIds.has(parent) ? parent : null;
   };
 
-  // Memories first: they are the point, and truncation trims from the end.
-  for (const memory of memories) {
-    add({
-      id: memory.id,
-      label: memory.title,
-      kind: memory.layer,
-      group: memory.layer,
-      detail: memory.sourceRef,
-    });
-  }
-
-  const files = new Set<string>();
-  for (const symbol of symbols) files.add(symbol.filePath);
-  for (const file of files) {
-    add({ id: `file:${file}`, label: file, kind: 'file', group: 'file' });
-  }
-
+  const byFile = new Map<string, SymbolRow[]>();
   for (const symbol of symbols) {
-    add({
-      id: symbol.id,
-      label: symbol.name,
-      kind: symbol.kind,
-      group: 'symbol',
-      detail: `${symbol.filePath}:${symbol.startLine}`,
-    });
-    links.push({ source: `file:${symbol.filePath}`, target: symbol.id, kind: 'DECLARES' });
+    const list = byFile.get(symbol.filePath) ?? [];
+    list.push(symbol);
+    byFile.set(symbol.filePath, list);
+  }
+  // Files something was decided about first, then the ones that declare most.
+  const decidedAbout = (file: string) =>
+    (byFile.get(file) ?? []).reduce(
+      (count, symbol) => count + symbol.memories.filter((memory) => recordedIds.has(memory.id)).length, 0);
+  const files = [...byFile.keys()].sort((a, b) =>
+    decidedAbout(b) - decidedAbout(a) || byFile.get(b)!.length - byFile.get(a)!.length || a.localeCompare(b));
+
+  const memoryNode = (memory: UiPayload['memories'][number]): GraphNode => ({
+    id: memory.id, label: memory.title, kind: memory.layer, group: memory.layer, detail: memory.sourceRef,
+  });
+  const symbolNode = (symbol: SymbolRow): GraphNode => ({
+    id: symbol.id, label: symbol.name, kind: symbol.kind, group: 'symbol',
+    detail: `${symbol.filePath}:${symbol.startLine}`,
+  });
+
+  const tiers: GraphNode[][] = [
+    recorded.map(memoryNode),
+    files.flatMap((file) => [
+      { id: `file:${file}`, label: file, kind: 'file', group: 'file' },
+      ...byFile.get(file)!.filter((symbol) => !parentOf(symbol)).map(symbolNode),
+    ]),
+    files.flatMap((file) => byFile.get(file)!.filter((symbol) => parentOf(symbol)).map(symbolNode)),
+    chunks.map(memoryNode),
+  ];
+
+  const nodes: GraphNode[] = [];
+  const present = new Set<string>();
+  for (const tier of tiers) {
+    for (const node of tier) {
+      if (nodes.length >= budget) break;
+      if (present.has(node.id)) continue;
+      present.add(node.id);
+      nodes.push(node);
+    }
+  }
+  const total = new Set(tiers.flat().map((node) => node.id)).size;
+
+  const links: Graph['links'] = [];
+  for (const symbol of symbols) {
+    if (!present.has(symbol.id)) continue;
+    const parent = parentOf(symbol);
+    const owner = parent && present.has(parent) ? parent : `file:${symbol.filePath}`;
+    if (present.has(owner)) links.push({ source: owner, target: symbol.id, kind: 'DECLARES' });
     for (const memory of symbol.memories) {
       if (present.has(memory.id)) links.push({ source: memory.id, target: symbol.id, kind: 'ABOUT' });
     }
   }
-
   for (const edge of edges) {
     if (present.has(edge.from) && present.has(edge.to)) {
       links.push({ source: edge.from, target: edge.to, kind: edge.type });
     }
   }
 
-  return { nodes, links };
+  const missing = (list: GraphNode[]) => list.filter((node) => !present.has(node.id)).length;
+  const omitted: Record<string, number> = {
+    'recorded memories': missing(tiers[0]!),
+    files: missing(tiers[1]!.filter((node) => node.group === 'file')),
+    declarations: missing(tiers[1]!.filter((node) => node.group === 'symbol')) + missing(tiers[2]!),
+    chunks: missing(tiers[3]!),
+  };
+
+  // Every relation, drawn or not. A click is answered from these rather than
+  // from the drawn links: once the budget left chunks out, their ABOUT links
+  // went with them, and clicking a class on a real repository answered
+  // "nothing is recorded" about code that had chunks all over it.
+  const relations: Graph['relations'] = { owner: {}, about: {} };
+  for (const symbol of symbols) {
+    relations.owner[symbol.id] = parentOf(symbol) ?? `file:${symbol.filePath}`;
+    if (symbol.memories.length > 0) relations.about[symbol.id] = symbol.memories.map((memory) => memory.id);
+  }
+  return { graph: { nodes, links, relations }, total, omitted };
 }

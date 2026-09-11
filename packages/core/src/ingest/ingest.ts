@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { MemoryStore } from '../store/store.js';
 import type { Layer, MemoryNode } from '../types.js';
 import type { EmbeddingProvider } from '../embed/index.js';
-import { chunk, declarations } from './chunker.js';
+import { chunk, declarations, CHUNKER_VERSION } from './chunker.js';
 import { redact } from './redact.js';
 import { loadMemIgnore, isIgnored, type MemIgnore } from './memignore.js';
 import { nodeId, contentHash } from '../util/ids.js';
@@ -338,10 +338,15 @@ export async function ingest(
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
     const relative = path.relative(projectRoot, file).split(path.sep).join('/');
-    const hash = contentHash(content);
+    // What was read, and which reader read it. A file is unchanged only if both
+    // match: an upgrade that teaches the reader a language re-reads every file
+    // of it on the next ingest. Keyed on the content alone, the 666 C# files of
+    // a repository ingested before C# had a code graph were skipped forever as
+    // unchanged, and the graph for them was never built.
+    const stamp = `${CHUNKER_VERSION}:${contentHash(content)}`;
 
     // Embedding is the expensive step; an unchanged file is not worth paying for.
-    if (!options.force && fileHashes[relative] === hash) {
+    if (!options.force && fileHashes[relative] === stamp) {
       report.skipped += 1;
       continue;
     }
@@ -374,7 +379,7 @@ export async function ingest(
     const prepared: {
       node: MemoryNode;
       vector: number[] | null;
-      symbols: { name: string; kind: string; startLine: number; endLine: number }[];
+      symbols: { name: string; qualifiedName: string; kind: string; startLine: number; endLine: number }[];
     }[] = [];
 
     for (const [index, piece] of pieces.entries()) {
@@ -446,7 +451,7 @@ export async function ingest(
     // One transaction per file, matching the granularity of fileHashes: an ingest
     // that fails halfway leaves whole files done and the rest untouched, so the
     // next run picks up exactly where this one stopped.
-    const fileHash = { ...fileHashes, [relative]: hash };
+    const fileHash = { ...fileHashes, [relative]: stamp };
     const counts = await store.transact(async () => {
       let created = 0;
       let refreshed = 0;
@@ -462,7 +467,7 @@ export async function ingest(
         // a symbol with no memory, or a memory whose symbol never arrived, is a
         // half-written graph nobody would notice.
         for (const declaration of declaredHere) {
-          const symbolId = `Symbol:${relative}:${declaration.name}`;
+          const symbolId = `Symbol:${relative}:${declaration.qualifiedName}`;
           await store.upsertSymbol({
             id: symbolId,
             name: declaration.name,
@@ -486,7 +491,7 @@ export async function ingest(
       // the old name in the graph with its original line range, pointing at
       // code that is gone. The file was just parsed, so what it declares is
       // known exactly -- this is the one moment the answer is available.
-      const declaredIds = new Set(declared.map((item) => `Symbol:${relative}:${item.name}`));
+      const declaredIds = new Set(declared.map((item) => `Symbol:${relative}:${item.qualifiedName}`));
       const goneSymbols = (await store.symbolsInFile(relative))
         .filter((symbol) => !declaredIds.has(symbol.id))
         .map((symbol) => symbol.id);
@@ -519,7 +524,7 @@ export async function ingest(
     report.removed += counts.removed;
     report.superseded += counts.superseded;
     report.symbolsRemoved += counts.symbolsRemoved;
-    fileHashes[relative] = hash;
+    fileHashes[relative] = stamp;
   }
 
   await reclaimVanished(store, targets, projectRoot, fileHashes, report);

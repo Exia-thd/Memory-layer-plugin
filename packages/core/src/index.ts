@@ -8,7 +8,7 @@ export * from './store/registry.js';
 export * as journal from './store/journal.js';
 
 export {
-  chunk, characterChunk, declarations, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP,
+  chunk, characterChunk, declarations, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP, CHUNKER_VERSION,
   type Chunk, type Declaration,
 } from './ingest/chunker.js';
 export { redact, looksRedacted } from './ingest/redact.js';

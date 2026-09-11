@@ -101,7 +101,7 @@ fts                ok      persisted-bm25
 vectorSearch       ok      exact-scan
 embeddings         ok      local
 tokenizer          ok      unicode-fold-v3
-astChunking        ok      web-tree-sitter -- 6 languages
+astChunking        ok      web-tree-sitter -- 36 languages
 ```
 
 `embeddings WARN hash` nghĩa là model không nạp được và tìm kiếm đang chạy bằng
@@ -127,6 +127,12 @@ Chạy lại rẻ: hash nội dung khiến file không đổi bị bỏ qua, lư
 file gần như không tốn gì. Mỗi lần chạy cũng ghi lại trang xem, nên trang và kho
 không bao giờ nói khác nhau.
 
+"Không đổi" nghĩa là cùng nội dung **và** cùng phiên bản bộ đọc code. Sau khi nâng
+cấp mà cách đọc code thay đổi, lần `ingest` kế tiếp tự đọc lại mọi file do bản cũ
+đọc, và dòng `code reader` của `doctor` cho biết còn bao nhiêu file đang chờ. Nếu
+chỉ so nội dung, một repo đã index từ trước khi ngôn ngữ của nó có code graph sẽ
+giữ đồ thị rỗng mãi mãi, vì file nào cũng "không đổi".
+
 **Sửa một file sẽ thay thế những gì nó từng sinh ra.** Id của chunk suy từ nội
 dung, nên file đổi là id đổi — và cho tới khi việc này được xử lý, một file sửa
 bốn lần thành **bốn node**, tất cả đều nằm trong index, tất cả cùng trả lời một
@@ -134,7 +140,7 @@ câu hỏi. Giờ bản cũ bị xoá, hoặc bị cho về hưu nếu có thứ
 quyết định mà nguồn gốc dẫn tới hư vô còn tệ hơn một mảnh cũ. Báo cáo nói rõ:
 
 ```
-ingested 3 files -> 12 new, 0 refreshed, 4 removed, 1 superseded
+ingested 3 files (0 unchanged) -> 12 new, 0 refreshed, 12 embedded, 4 removed, 1 superseded
 ```
 
 **Cho `ingest` tự chạy.** Chỉ mục là dữ liệu dẫn xuất: file mới là sự thật, chạy
@@ -210,7 +216,7 @@ và thắng cả ngưỡng dung lượng.
 Mọi lần bỏ qua đều được in ra kèm lý do và kèm đường thoát:
 
 ```
-ingested 12 files (0 unchanged) -> 12 new, 12 embedded
+ingested 12 files (0 unchanged) -> 12 new, 0 refreshed, 12 embedded
 skipped 4:
    2 not text (.pdf .png)
       nothing to index; read it with an agent and record the conclusion
@@ -236,6 +242,27 @@ nguồn dày đặc khai báo thành **7 494** chunk, vì chunker cắt theo bi�
 File nào đẻ ra số chunk bất thường sẽ được **nêu tên** trong báo cáo chứ không bị
 từ chối — vì từ đây nhìn vào, một API client sinh tự động và một module lõi viết
 tay trông y hệt nhau, chỉ bạn mới biết cái nào là cái nào.
+
+### Code được đọc thế nào
+
+Cả 36 grammar đi kèm package đều được dùng; package có thêm grammar mà bảng rule
+không có là một test fail.
+
+| Nhóm | Ngôn ngữ | Ghi lại gì |
+|---|---|---|
+| Khai báo, ở mọi độ sâu | TypeScript, TSX, JavaScript, Python, Go, Rust, Java, C#, Kotlin, Scala, Swift, Dart, PHP, Ruby, C, C++, Objective-C, Lua, Bash, Elixir, OCaml, Zig, Solidity, ReScript, Emacs Lisp, SystemRDL, TLA+, Elm, CodeQL | Class, method, hàm, kiểu và biến cấp module, mỗi cái mang tên kèm thứ bao nó: `OrderService.Get`, chứ không phải hai cái `Get`. Biến cục bộ trong thân hàm không được ghi |
+| Parse lại | Vue | Khối `<script>` bằng grammar TypeScript hoặc JavaScript theo `lang`, `<style>` bằng CSS |
+| Chỉ cấu trúc | CSS, HTML, JSON, TOML, YAML, ERB/EJS | Không có symbol — không có gì trong đó khai báo code — nhưng chunk được cắt theo rule, element, key và table |
+
+Một khai báo quá lớn cho một chunk được cắt **giữa các thành phần của nó**: class
+giữa các method, object JSON giữa các key, file CI giữa các job. Chỉ một dòng đơn
+không còn cấu trúc để chia, như file minified, mới rơi về cắt theo ký tự. Ngôn ngữ
+không có grammar vẫn được index, dưới dạng văn bản.
+
+Bốn grammar — Elm, CodeQL, YAML và Lua — được nạp từ `packages/core/grammars/`
+thay vì `tree-sitter-wasms`, vì bản build của gói đó không nạp được, hoặc (với Lua)
+chỉ parse đúng một lần mỗi process. Nguồn gốc và checksum từng file ghi trong
+README của thư mục đó.
 
 ## Bốn thứ bạn thực sự sẽ chạy
 
@@ -296,6 +323,7 @@ Một file HTML, dữ liệu nhúng sẵn. Không server, không bước build �
 dai-memory ui                     # ghi .memory/ui.html
 dai-memory ui src/store           # thu hẹp theo đường dẫn
 dai-memory ui --out graph.html    # chỗ nào tiện gửi cho người khác
+dai-memory ui --max-nodes 4000    # vẽ nhiều hơn mức mặc định 1500
 ```
 
 **Nó sinh ra lúc nào:** `dai-memory init` ghi nó, và mọi lần `ingest` hay `prune` có
@@ -315,9 +343,12 @@ refresh chỉ ra đúng ảnh chụp cũ — thứ làm mới nó là lần `ing
 Ba tab: đồ thị 3D gồm file, khai báo và ký ức về chúng; kho ký ức dạng bảng lọc
 được; và báo cáo `doctor`.
 
+Khai báo treo vào khai báo bao nó: file giữ `OrderService`, và `OrderService`
+giữ `Get`.
+
 Click **bất kỳ node nào** cũng mở ra thứ nó nói về — một khai báo trả lời bằng ký
-ức ghi nhận cho nó, một file trả lời bằng mọi ký ức của các khai báo trong đó
-cộng thêm những gì ghi thẳng vào đường dẫn. Click không ra gì thì **nói ra** chứ
+ức ghi nhận cho nó và cho mọi thứ nó bao, một file trả lời bằng mọi ký ức của các
+khai báo trong đó cộng thêm những gì ghi thẳng vào đường dẫn. Click không ra gì thì **nói ra** chứ
 không im lặng.
 
 Nền sáng mặc định. Nút ở đầu trang đổi sang tối và nhớ lựa chọn; nó **không** đi
@@ -333,8 +364,13 @@ trang **nói rõ hỏng ở đâu** thay vì hiện canvas trắng — đồ th�
 "trong này không có gì", một thông điệp khác hẳn và tệ hơn nhiều. Hai tab kia dữ
 liệu nằm inline nên chạy bình thường.
 
-Trên 1500 node, nó giữ phần quan trọng nhất và **nói đã bỏ bao nhiêu**. Thu hẹp
-bằng đường dẫn.
+Trên 1500 node, đồ thị bị cắt, và thứ tự **được giữ chỗ** là: ký ức do người ghi,
+rồi file cùng các khai báo cấp trên cùng của nó, rồi method và property, cuối cùng
+là các chunk của file. Phần bị cắt được **báo trên tab Health** kèm số lượng từng
+loại, và mọi ký ức vẫn nằm đủ trong tab Memories. Chunk bị cắt trước vì trên một
+repo thật có hàng nghìn chunk: khi ký ức được giữ trước, 7 567 chunk chiếm hết
+1 500 chỗ và đồ thị không hiện nổi một file. Thu hẹp bằng đường dẫn, hoặc nâng giới
+hạn bằng `--max-nodes 4000` nếu máy vẽ nổi.
 
 ### `dai-memory doctor`
 

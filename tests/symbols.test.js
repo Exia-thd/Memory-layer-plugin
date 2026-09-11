@@ -10,7 +10,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chunk, declarations } from '@memory-layer/core';
-import { makeRepo, cli } from './helpers.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { makeRepo, cli, cliRaw } from './helpers.js';
 
 const SOURCE = [
   'export function chargeInvoice(invoice) {',
@@ -95,6 +97,46 @@ test('re-ingesting the same file does not duplicate symbols', async () => {
     const why = JSON.parse(cli(repo, ['why', 'chargeInvoice', '--json']));
     const ids = why.results.map((hit) => hit.id);
     assert.equal(new Set(ids).size, ids.length, 'the same memory came back twice');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a file read by an older code reader is read again, not skipped as unchanged', () => {
+  // Unchanged content used to mean skip. A C# repository ingested before C#
+  // had a code graph kept its empty graph forever: every file was unchanged.
+  const source = [
+    'namespace Inventory.Api',
+    '{',
+    '    public class OrderService',
+    '    {',
+    '        public Order Get(int id) { return null; }',
+    '    }',
+    '}',
+    '',
+  ].join('\n');
+  const repo = makeRepo({ 'src/OrderService.cs': source });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    const first = JSON.parse(cli(repo, ['ingest', 'src', '--json']));
+    assert.ok(first.symbols >= 2, `C# declared nothing: ${JSON.stringify(first)}`);
+    const again = JSON.parse(cli(repo, ['ingest', 'src', '--json']));
+    assert.equal(again.files, 0, 'unchanged content was read again by the same reader');
+
+    // Every store written before the reader was versioned holds the bare hash.
+    const metaFile = path.join(repo.dir, '.memory', 'meta.json');
+    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    for (const key of Object.keys(meta.fileHashes)) meta.fileHashes[key] = meta.fileHashes[key].replace(/^\d+:/, '');
+    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2));
+
+    const before = cliRaw(repo, ['doctor']).stdout;
+    assert.match(before, /code reader\s+WARN.*older version/, `doctor did not report the stale reader:\n${before}`);
+
+    const upgraded = JSON.parse(cli(repo, ['ingest', 'src', '--json']));
+    assert.equal(upgraded.files, 1, 'a file read by an older reader was skipped as unchanged');
+
+    const after = cliRaw(repo, ['doctor']).stdout;
+    assert.match(after, /code reader\s+ok/, `the stale reader was still reported:\n${after}`);
   } finally {
     repo.cleanup();
   }

@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"],
+  "files": ["dist", "grammars"],
   "scripts": {
     "build": "tsc -b",
     "test": "node --test ../../tests/*.test.js"
@@ -15,7 +15,7 @@
     "graphology": "^0.25.4",
     "graphology-communities-louvain": "^2.0.1",
     "tree-sitter-wasms": "^0.1.11",
-    "web-tree-sitter": "0.24.7"
+    "web-tree-sitter": "0.25.10"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^4.0.0"

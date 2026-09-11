@@ -6,6 +6,7 @@ import { pendingCount } from './store/journal.js';
 import { summarizeCapability } from './store/capabilities.js';
 import { identityLabel, type EmbeddingIdentity } from './embed/types.js';
 import { probeAstChunking } from './ingest/languages.js';
+import { CHUNKER_VERSION } from './ingest/chunker.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -145,6 +146,20 @@ export async function doctor(
             : `postings built with ${builtWith === undefined ? 'an unrecorded tokenizer' : `v${builtWith}`}, ` +
               `this build queries with v${TOKENIZER_VERSION} -- keyword results are ` +
               'partial until `dai-memory ingest --force` rebuilds them',
+    });
+
+    // Files read by an older reader keep that reader's chunks and symbols until
+    // they are read again. Ingest does that on its own; this says how many wait.
+    const stamps = Object.values(meta.fileHashes ?? {});
+    const olderReader = stamps.filter((stamp) => !stamp.startsWith(`${CHUNKER_VERSION}:`)).length;
+    checks.push({
+      name: 'code reader',
+      status: olderReader > 0 ? 'warn' : 'ok',
+      detail:
+        olderReader > 0
+          ? `${olderReader}/${stamps.length} files were read by an older version of the code reader -- ` +
+            'their chunks and code graph are out of date until `dai-memory ingest` re-reads them'
+          : `v${CHUNKER_VERSION}, ${stamps.length} files`,
     });
 
     const orphans = await store.orphanedMemories();
