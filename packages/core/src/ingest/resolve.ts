@@ -291,7 +291,11 @@ export async function resolvePending(
       report.calls += 1;
       report.byConfidence[picked.confidence!] = (report.byConfidence[picked.confidence!] ?? 0) + 1;
     }
-    report.external = Math.max(0, report.external - 1);
+    // Taken off the count it was added to. Decrementing `external` for a row
+    // that was ambiguous reported a graph that had resolved something it had
+    // not, in the other column.
+    if (item.reason === 'ambiguous') report.ambiguous = Math.max(0, report.ambiguous - 1);
+    else report.external = Math.max(0, report.external - 1);
     resolved.push(item.id);
   }
   await store.deletePendingCalls(resolved);

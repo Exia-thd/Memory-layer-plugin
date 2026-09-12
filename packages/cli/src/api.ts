@@ -934,10 +934,11 @@ async function reachedByCalls(
   if (reaches.size === 0) return [];
 
   const out: NonNullable<ChangedFileMemory['viaCalls']> = [];
-  for (const node of await store.nodesAboutSymbolIds([...reaches.keys()], limit * 4)) {
+  for (const { node, symbolId } of await store.nodesAboutSymbolIdsAnchored([...reaches.keys()], limit * 4)) {
     if (node.layer === 'artifact' || seen.has(node.id)) continue;
     seen.add(node.id);
-    const target = [...reaches.values()][0] ?? '';
+    // The declaration this memory's own code calls, not whichever was first.
+    const target = reaches.get(symbolId) ?? '';
     out.push({
       id: node.id,
       layer: node.layer,

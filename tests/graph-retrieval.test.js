@@ -114,3 +114,72 @@ test('changing a declaration surfaces what its callers decided', () => {
     repo.cleanup();
   }
 });
+
+test('each reached decision names the declaration its own code calls', () => {
+  // Two callers, two different declarations in the changed file. The label has
+  // to follow each memory to its own target: taking whichever target came
+  // first made it right half the time and wrong the other half.
+  const repo = makeRepo({
+    'src/Domain.cs': [
+      'namespace Billing.Domain',
+      '{',
+      '    public class Domain',
+      '    {',
+      '        public int Alpha() { return 1; }',
+      '        public int Beta() { return 2; }',
+      '    }',
+      '}',
+      '',
+    ].join('\n'),
+    'src/CallsAlpha.cs': [
+      'using Billing.Domain;',
+      '',
+      'namespace Billing.Api',
+      '{',
+      '    public class CallsAlpha',
+      '    {',
+      '        private readonly Domain _domain;',
+      '        public int Run() { return _domain.Alpha(); }',
+      '    }',
+      '}',
+      '',
+    ].join('\n'),
+    'src/CallsBeta.cs': [
+      'using Billing.Domain;',
+      '',
+      'namespace Billing.Api',
+      '{',
+      '    public class CallsBeta',
+      '    {',
+      '        private readonly Domain _domain;',
+      '        public int Run() { return _domain.Beta(); }',
+      '    }',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src']);
+    cli(repo, ['write', '--layer', 'semantic', '--title', 'First caller keeps its own contract',
+      '--body', 'Recorded where the first one is written.', '--source-ref', 'src/CallsAlpha.cs#L8-L8']);
+    cli(repo, ['write', '--layer', 'semantic', '--title', 'Second caller keeps its own contract',
+      '--body', 'Recorded where the second one is written.', '--source-ref', 'src/CallsBeta.cs#L8-L8']);
+
+    fs.writeFileSync(
+      path.join(repo.dir, 'src', 'Domain.cs'),
+      fs.readFileSync(path.join(repo.dir, 'src', 'Domain.cs'), 'utf8').replace('return 1;', 'return 11;'),
+    );
+    const report = JSON.parse(cli(repo, ['changes', '--scope', 'working', '--json']));
+    const entry = report.covered.find((item) => item.file.endsWith('Domain.cs'));
+    const reached = entry?.viaCalls ?? [];
+    assert.ok(reached.length >= 2, `both callers were not reported: ${JSON.stringify(reached)}`);
+
+    for (const memory of reached) {
+      const expected = memory.title.startsWith('First') ? 'Domain.Alpha' : 'Domain.Beta';
+      assert.equal(memory.reaches, expected, `${memory.title} says it reaches ${memory.reaches}`);
+    }
+  } finally {
+    repo.cleanup();
+  }
+});

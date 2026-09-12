@@ -217,7 +217,14 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
     if (declaredType) {
       const typeName = lastName(declaredType);
       if (typeName && !RESERVED_TYPE.test(typeName)) {
-        for (const name of declaredNames(node)) typed.set(name, typeName);
+        for (const name of declaredNames(node)) {
+          // A file can declare `repo` twice with different types -- a field in
+          // one class, a local in another method. Knowing it is one of two
+          // types is not knowing, so the name stops being evidence.
+          const seenAs = typed.get(name);
+          if (seenAs === undefined) typed.set(name, typeName);
+          else if (seenAs !== typeName) typed.set(name, AMBIGUOUS_TYPE);
+        }
       }
     }
 
@@ -238,7 +245,9 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
   // What each receiver was declared as. Filled in after the walk because a
   // field can be declared below the method that uses it.
   for (const call of found.calls) {
-    if (call.receiver) call.receiverType = typed.get(call.receiver) ?? null;
+    if (!call.receiver) continue;
+    const declaredAs = typed.get(call.receiver);
+    call.receiverType = declaredAs && declaredAs !== AMBIGUOUS_TYPE ? declaredAs : null;
   }
 
   // In file order: the walk is a stack, and a caller reading a diff should see
@@ -250,6 +259,9 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
 }
 
 const NAME_NODE = /(^|_)(identifier|name)(_ref)?$|^(constant|word|symbol|literalId|id)$/;
+
+/** Recorded when a name is declared with two different types in one file. */
+const AMBIGUOUS_TYPE = '\u0000ambiguous';
 
 /** `var`, `void`, `int`: a type, but not one this repository declares. */
 const RESERVED_TYPE = /^(var|void|int|long|short|byte|char|bool|boolean|float|double|decimal|string|object|any|unknown|never|dynamic|auto|let|const|final|self|this)$/i;

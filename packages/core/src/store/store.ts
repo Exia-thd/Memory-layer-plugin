@@ -634,6 +634,28 @@ export class MemoryStore {
     return rows.map(rowToNode);
   }
 
+  /**
+   * The same, keeping which declaration each memory is about.
+   *
+   * A report that says "reached through X" has to name the X this memory
+   * actually hangs off. Taking any one of them made the label a coin flip.
+   */
+  async nodesAboutSymbolIdsAnchored(
+    ids: string[],
+    limit: number,
+  ): Promise<Array<{ node: MemoryNode; symbolId: string }>> {
+    if (!this.graphReady || ids.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)
+       WHERE list_contains($ids, s.id) AND m.superseded_at = 0
+       RETURN ${NODE_COLUMNS}, s.id AS anchor
+       ORDER BY m.importance DESC, m.created_at DESC
+       LIMIT ${Math.max(1, Math.floor(limit))}`,
+      { ids },
+    );
+    return rows.map((row) => ({ node: rowToNode(row), symbolId: String(row.anchor) }));
+  }
+
   async nodesAboutSymbol(name: string): Promise<MemoryNode[]> {
     const rows = await this.run(
       `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)
@@ -1076,18 +1098,19 @@ export class MemoryStore {
 
   async pendingCallsNamed(names: string[]): Promise<Array<{
     id: string; filePath: string; fromSymbol: string; name: string; receiver: string;
-    line: number; kind: string;
+    line: number; kind: string; reason: string;
   }>> {
     if (names.length === 0) return [];
     const rows = await this.run(
       `MATCH (p:PendingCall) WHERE list_contains($names, p.name)
        RETURN p.id AS id, p.file_path AS filePath, p.from_symbol AS fromSymbol,
-              p.name AS name, p.receiver AS receiver, p.line AS line, p.kind AS kind`,
+              p.name AS name, p.receiver AS receiver, p.line AS line, p.kind AS kind,
+              p.reason AS reason`,
       { names },
     );
     return rows as unknown as Array<{
       id: string; filePath: string; fromSymbol: string; name: string; receiver: string;
-      line: number; kind: string;
+      line: number; kind: string; reason: string;
     }>;
   }
 
