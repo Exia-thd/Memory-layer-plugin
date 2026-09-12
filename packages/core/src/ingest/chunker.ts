@@ -16,8 +16,9 @@ export const DEFAULT_CHUNK_SIZE = 1200;
  *   1  top-level declarations only, six languages
  *   2  declarations at any depth, qualified names, 36 grammars, oversized
  *      declarations split between their members
+ *   3  calls, base types and imports recorded alongside the declarations
  */
-export const CHUNKER_VERSION = 2;
+export const CHUNKER_VERSION = 3;
 export const DEFAULT_OVERLAP = 120;
 
 export interface Chunk {

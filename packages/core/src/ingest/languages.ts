@@ -60,6 +60,46 @@ export interface LanguageRule {
   pack?: boolean;
   /** The grammar file ships in this package's `grammars/`, not in tree-sitter-wasms. */
   vendored?: boolean;
+  /**
+   * How this grammar spells what one piece of code does to another.
+   *
+   * Measured like the rest of this table. A language with no entry here still
+   * gets declarations and chunks; it contributes no calls, imports or base
+   * types, and `doctor` counts it as such rather than implying the repository
+   * has none.
+   */
+  relations?: {
+    /** Node types that are a call or a construction. */
+    calls?: string[];
+    /**
+     * Of those, the ones that construct a type: `new Order()`.
+     *
+     * A construction means a class, a record, a struct -- never a method. Told
+     * apart because a repository full of entities has a property named after
+     * its type, and `new Customer()` matching the property `Customer` is how a
+     * hundred calls land on the wrong declaration or on none.
+     */
+    constructs?: string[];
+    /**
+     * Fields that hold the thing being called, tried in order. Objective-C
+     * needs two: a C call keeps it in `function`, a message in `selector`.
+     */
+    calleeFields?: string[];
+    /** Node types that import another module. */
+    imports?: string[];
+    /** Field holding the module text; `source` unless the grammar differs. */
+    importSource?: string;
+    /** Node types listing base classes and interfaces. */
+    heritage?: string[];
+    /** Fields holding base types where the grammar gives them no node of their own. */
+    heritageFields?: string[];
+    /** Callee names that are an import: Ruby's `require`, Elixir's `alias`. */
+    importCalls?: string[];
+    /** Callee names that are syntax rather than a call: Elixir's `defmodule`. */
+    ignoreCallees?: string[];
+    /** Node types that name the file's namespace, package or module. */
+    container?: string[];
+  };
 }
 
 /**
@@ -85,6 +125,12 @@ const RULES: Record<string, LanguageRule> = {
       'method_definition', 'abstract_method_signature', 'internal_module', 'lexical_declaration',
     ],
     topLevelOnly: ['lexical_declaration'],
+    relations: {
+      calls: ['call_expression', 'new_expression'],
+      constructs: ['new_expression'],
+      imports: ['import_statement'],
+      heritage: ['class_heritage'],
+    },
   },
   tsx: {
     label: 'tsx',
@@ -101,6 +147,12 @@ const RULES: Record<string, LanguageRule> = {
       'method_definition', 'abstract_method_signature', 'internal_module', 'lexical_declaration',
     ],
     topLevelOnly: ['lexical_declaration'],
+    relations: {
+      calls: ['call_expression', 'new_expression'],
+      constructs: ['new_expression'],
+      imports: ['import_statement'],
+      heritage: ['class_heritage'],
+    },
   },
   javascript: {
     label: 'javascript',
@@ -112,6 +164,12 @@ const RULES: Record<string, LanguageRule> = {
     ],
     symbols: ['class_declaration', 'function_declaration', 'method_definition', 'lexical_declaration'],
     topLevelOnly: ['lexical_declaration'],
+    relations: {
+      calls: ['call_expression', 'new_expression'],
+      constructs: ['new_expression'],
+      imports: ['import_statement'],
+      heritage: ['class_heritage'],
+    },
   },
   python: {
     label: 'python',
@@ -119,6 +177,13 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition', 'class_definition', 'decorated_definition'],
     symbols: ['class_definition', 'function_definition'],
+    relations: {
+      calls: ['call'],
+      imports: ['import_statement', 'import_from_statement'],
+      // `class Invoice(Base, Store)` -- the bases are an argument list, reachable
+      // only as a field, since an argument list elsewhere is just arguments.
+      heritageFields: ['superclasses'],
+    },
   },
   go: {
     label: 'go',
@@ -126,6 +191,12 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_declaration', 'method_declaration', 'type_declaration'],
     symbols: ['function_declaration', 'method_declaration', 'type_spec', 'method_spec'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['import_spec'],
+      importSource: 'path',
+      container: ['package_clause'],
+    },
   },
   rust: {
     label: 'rust',
@@ -139,6 +210,10 @@ const RULES: Record<string, LanguageRule> = {
       'function_item', 'function_signature_item', 'struct_item', 'enum_item', 'trait_item',
       'mod_item', 'type_item', 'const_item', 'macro_definition',
     ],
+    relations: {
+      calls: ['call_expression', 'macro_invocation'],
+      imports: ['use_declaration'],
+    },
   },
   java: {
     label: 'java',
@@ -152,6 +227,15 @@ const RULES: Record<string, LanguageRule> = {
       'class_declaration', 'interface_declaration', 'record_declaration', 'enum_declaration',
       'annotation_type_declaration', 'method_declaration', 'constructor_declaration',
     ],
+    relations: {
+      // Java puts the called name in `name` and the receiver in `object`.
+      calls: ['method_invocation', 'object_creation_expression'],
+      constructs: ['object_creation_expression'],
+      calleeFields: ['name'],
+      imports: ['import_declaration'],
+      heritage: ['superclass', 'super_interfaces'],
+      container: ['package_declaration'],
+    },
   },
   c_sharp: {
     label: 'c_sharp',
@@ -170,6 +254,13 @@ const RULES: Record<string, LanguageRule> = {
     // C# 10, file-scoped. Not looked through, the namespace is the file's only
     // top-level node, and the whole file is one unit.
     containers: ['namespace_declaration', 'file_scoped_namespace_declaration', 'declaration_list'],
+    relations: {
+      calls: ['invocation_expression', 'object_creation_expression'],
+      constructs: ['object_creation_expression'],
+      imports: ['using_directive'],
+      heritage: ['base_list'],
+      container: ['namespace_declaration', 'file_scoped_namespace_declaration'],
+    },
   },
   kotlin: {
     label: 'kotlin',
@@ -178,6 +269,12 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['class_declaration', 'object_declaration', 'function_declaration'],
     symbols: ['class_declaration', 'object_declaration', 'function_declaration', 'property_declaration'],
     variables: ['property_declaration'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['import_header'],
+      heritage: ['delegation_specifier'],
+      container: ['package_header'],
+    },
   },
   scala: {
     label: 'scala',
@@ -188,6 +285,13 @@ const RULES: Record<string, LanguageRule> = {
       'class_definition', 'trait_definition', 'object_definition',
       'function_definition', 'function_declaration',
     ],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['import_declaration'],
+      importSource: 'path',
+      heritage: ['extends_clause'],
+      container: ['package_clause'],
+    },
   },
   swift: {
     label: 'swift',
@@ -200,6 +304,11 @@ const RULES: Record<string, LanguageRule> = {
       'typealias_declaration',
     ],
     variables: ['property_declaration'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['import_declaration'],
+      heritage: ['inheritance_specifier'],
+    },
   },
   dart: {
     label: 'dart',
@@ -213,6 +322,13 @@ const RULES: Record<string, LanguageRule> = {
       'class_definition', 'mixin_declaration', 'enum_declaration', 'extension_declaration',
       'function_signature', 'constructor_signature',
     ],
+    // No calls: Dart's grammar has no call node, only a chain of selectors, so
+    // the name being called is not reachable the way it is everywhere else.
+    // Imports and base types are.
+    relations: {
+      imports: ['import_or_export'],
+      heritage: ['superclass', 'interfaces'],
+    },
   },
   php: {
     label: 'php',
@@ -226,6 +342,17 @@ const RULES: Record<string, LanguageRule> = {
       'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration',
       'function_definition', 'method_declaration',
     ],
+    relations: {
+      calls: [
+        'member_call_expression', 'function_call_expression',
+        'scoped_call_expression', 'object_creation_expression',
+      ],
+      constructs: ['object_creation_expression'],
+      calleeFields: ['name', 'function'],
+      imports: ['namespace_use_declaration'],
+      heritage: ['base_clause', 'class_interface_clause'],
+      container: ['namespace_definition'],
+    },
     containers: ['namespace_definition', 'compound_statement'],
   },
   ruby: {
@@ -234,6 +361,12 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['class', 'method', 'singleton_method'],
     symbols: ['module', 'class', 'method', 'singleton_method'],
+    relations: {
+      calls: ['call'],
+      calleeFields: ['method'],
+      importCalls: ['require', 'require_relative', 'load'],
+      heritage: ['superclass'],
+    },
     containers: ['module', 'body_statement'],
   },
   c: {
@@ -242,6 +375,11 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
     symbols: ['function_definition', 'struct_specifier', 'enum_specifier', 'union_specifier', 'type_definition'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['preproc_include'],
+      importSource: 'path',
+    },
   },
   cpp: {
     label: 'cpp',
@@ -249,6 +387,13 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition', 'class_specifier', 'struct_specifier', 'enum_specifier', 'union_specifier'],
     symbols: ['function_definition', 'class_specifier', 'struct_specifier', 'enum_specifier', 'union_specifier'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['preproc_include'],
+      importSource: 'path',
+      heritage: ['base_class_clause'],
+      container: ['namespace_definition'],
+    },
     containers: ['namespace_definition', 'declaration_list', 'template_declaration', 'linkage_specification'],
   },
   objc: {
@@ -260,6 +405,14 @@ const RULES: Record<string, LanguageRule> = {
       'class_interface', 'class_implementation', 'protocol_declaration',
       'method_declaration', 'method_definition', 'function_definition',
     ],
+    relations: {
+      calls: ['call_expression', 'message_expression'],
+      // A C call keeps the callee in `function`; an Objective-C message keeps
+      // the selector in `method`, with the object in `receiver`.
+      calleeFields: ['function', 'method'],
+      imports: ['preproc_include'],
+      importSource: 'path',
+    },
   },
   // Vendored too. The Lua grammar in tree-sitter-wasms parses correctly only
   // the first time in a runtime: the second parse of the same source, with a
@@ -272,6 +425,11 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_declaration'],
     symbols: ['function_declaration'],
+    relations: {
+      calls: ['function_call'],
+      calleeFields: ['name'],
+      importCalls: ['require'],
+    },
   },
   bash: {
     label: 'bash',
@@ -279,6 +437,11 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition'],
     symbols: ['function_definition'],
+    relations: {
+      calls: ['command'],
+      calleeFields: ['name'],
+      importCalls: ['source', '.'],
+    },
   },
   elixir: {
     label: 'elixir',
@@ -290,6 +453,15 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['call'],
     symbols: ['call'],
     containers: ['do_block'],
+    relations: {
+      calls: ['call'],
+      calleeFields: ['target'],
+      importCalls: ['alias', 'import', 'require', 'use'],
+      ignoreCallees: [
+        'defmodule', 'def', 'defp', 'defmacro', 'defmacrop', 'defguard', 'defguardp',
+        'defdelegate', 'defprotocol', 'defimpl', 'defexception', 'defstruct',
+      ],
+    },
   },
   ocaml: {
     label: 'ocaml',
@@ -298,6 +470,10 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['module_definition', 'type_definition', 'value_definition', 'module_type_definition'],
     symbols: ['module_binding', 'type_binding', 'module_type_definition', 'let_binding'],
     variables: ['let_binding'],
+    relations: {
+      calls: ['application_expression'],
+      imports: ['open_module'],
+    },
   },
   zig: {
     label: 'zig',
@@ -306,6 +482,7 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['function_declaration', 'variable_declaration'],
     symbols: ['function_declaration', 'variable_declaration'],
     variables: ['variable_declaration'],
+    relations: { calls: ['call_expression'] },
   },
   solidity: {
     label: 'solidity',
@@ -316,6 +493,12 @@ const RULES: Record<string, LanguageRule> = {
       'contract_declaration', 'interface_declaration', 'library_declaration',
       'function_definition', 'event_definition', 'modifier_definition', 'struct_declaration',
     ],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['import_directive'],
+      importSource: 'source',
+      heritage: ['inheritance_specifier'],
+    },
   },
   rescript: {
     label: 'rescript',
@@ -324,6 +507,10 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['type_declaration', 'module_declaration', 'let_declaration'],
     symbols: ['type_binding', 'module_binding', 'let_binding'],
     variables: ['let_binding'],
+    relations: {
+      calls: ['call_expression'],
+      imports: ['open_statement'],
+    },
   },
   elisp: {
     label: 'elisp',
@@ -486,6 +673,24 @@ const BY_EXTENSION: Record<string, string> = {
 /** The rule for a label, for callers that already know the language. */
 export function ruleFor(label: string): LanguageRule | null {
   return RULES[label] ?? null;
+}
+
+/**
+ * Languages whose grammar this build reads relations from, and those it does
+ * not. A language in the second list still gets declarations and chunks; it
+ * contributes no calls, and `doctor` says so rather than letting a repository
+ * look like it makes none.
+ */
+export function relationLanguages(): { with: string[]; without: string[] } {
+  const withRelations: string[] = [];
+  const without: string[] = [];
+  for (const rule of Object.values(RULES)) {
+    // A language that declares nothing calls nothing: JSON and CSS are cut on
+    // their structure and belong in neither list.
+    if (!rule.grammar || !rule.symbols?.length) continue;
+    (rule.relations?.calls?.length ? withRelations : without).push(rule.label);
+  }
+  return { with: withRelations, without };
 }
 
 /** Every language with a grammar, for the capability report. */

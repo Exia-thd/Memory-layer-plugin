@@ -104,7 +104,10 @@ astChunking        ok      web-tree-sitter -- 36 languages
 `embeddings WARN hash` means the model did not load and search is running on a
 lexical fallback. It still works; it just cannot match a question phrased
 differently from the text. The first run downloads about 23 MB into
-`<MEMORY_LAYER_HOME>/models` and takes roughly 25 seconds.
+`<MEMORY_LAYER_HOME>/models`. Measured: 130 MB for
+`Xenova/paraphrase-multilingual-MiniLM-L12-v2`, a minute or two on a home
+connection. `init` does that download, so a machine that has run `init` once is
+ready offline afterwards.
 
 Then load the project:
 
@@ -245,6 +248,44 @@ Four grammars -- Elm, CodeQL, YAML and Lua -- are loaded from
 cannot be loaded or, for Lua, parse correctly only once per process. Where each
 file came from, and its checksum, is in that directory's README.
 
+### What one piece of code does to another
+
+Beyond what a file declares, the graph records three relations: **calls**,
+**inherits** and **imports**. They are what turn a list of declarations into a
+map, and what lets the pre-commit hook answer "what else reaches this".
+
+Resolving a name is the hard part, and this does it without a type checker. A
+call site says `FindAsync`; which declaration that is comes from four rules,
+tried in order, and **the answer carries which rule found it**:
+
+| Confidence | Means |
+|---|---|
+| `file` | the only declaration of that name in the calling file |
+| `receiver` | the receiver names its owner: `OrderMapper.ToDto` |
+| `import` | the only match among the files this one imports |
+| `unique` | the only declaration of that name in the repository |
+
+A fifth rule does most of the work in C# and Java: a `using` or `import` names
+a namespace spread over many files, so a candidate whose file declares a
+namespace this one can see counts as reached through an import.
+
+**Where none of those picks exactly one, nothing is written.** Two classes with
+a `Save` method, no import to separate them and no receiver type: the call is
+counted as **ambiguous** and reported. A blast radius built on a guess is worse
+than one that admits the gap.
+
+A call into a framework -- `HasColumnName`, `ToList`, `Produces` -- names
+nothing this repository declares. Those are counted separately as **going
+outside the repository**, because they are not gaps and never will be: measured
+on a real C# service, they are the large majority of call sites, and counting
+them as failures made a working graph read as 5% complete. `doctor` reports the
+share of calls *into this repository* that found their declaration.
+
+Calls are read from 24 languages. Dart is the exception among the languages
+that have declarations: its grammar has no call node, only a chain of
+selectors, so Dart contributes imports and base types but no calls -- `doctor`
+names it, along with any other language in the same position.
+
 ## The four things you will actually run
 
 ### `dai-memory why <file|symbol>`
@@ -305,7 +346,7 @@ the filesystem.
 dai-memory ui                     # writes .memory/ui.html
 dai-memory ui src/store           # narrowed to a path
 dai-memory ui --out graph.html    # somewhere you can mail it
-dai-memory ui --max-nodes 4000    # draw more than the default 1500
+dai-memory ui --max-nodes 6000    # draw more than the default 3000
 ```
 
 **When it appears:** `dai-memory init` writes it, and every `ingest` or `prune` that
@@ -323,8 +364,11 @@ you can see how old what you are looking at is.
 600 ms on a store of 638 nodes.
 
 
-Three tabs: a 3D graph of files, declarations and the memory about them; the
-store as a filterable table; and the `doctor` report.
+Three tabs: a 3D map of the code -- files, the declarations in them, the calls
+between those, what inherits what, what imports what, and the memory recorded
+against any of it; the store as a filterable table; and the `doctor` report.
+Call and inheritance edges are drawn with an arrow, and hovering one says how
+it was resolved.
 
 Declarations hang off the declaration that encloses them: a file holds
 `OrderService`, and `OrderService` holds `Get`.
@@ -350,9 +394,13 @@ showing an empty canvas — a blank graph reads as "there is nothing in here",
 which is a very different and much worse message. The other tabs work either
 way; their data is inline.
 
-Above 1500 nodes the graph is cut, in this order of what keeps its place:
+Above 3000 nodes the graph is cut, in this order of what keeps its place:
 memories a person recorded, then files with their top-level declarations, then
-methods and properties, then chunks of the files. The cut is reported on the
+the members that calls run between -- most connected first -- then the rest of
+the members, then chunks of the files. The budget went to files and classes
+before that, and on a 630-file repository 46 of its 4,188 calls had both ends
+drawn: a map of a system is mostly its methods, because that is where the calls
+are. The cut is reported on the
 Health tab with a count per kind, and every memory is still listed on the
 Memories tab. Chunks go first because on a real repository there are thousands
 of them: when memories were kept first, 7,567 chunks took all 1,500 places and

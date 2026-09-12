@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { writeFileAtomic } from '../util/atomic.js';
 import path from 'node:path';
 import type { Capabilities } from '../types.js';
-import { SCHEMA_VERSION } from './schema.js';
+import { SCHEMA_VERSION, MIGRATABLE_FROM } from './schema.js';
 
 export interface StoreMeta {
   projectName: string;
@@ -30,6 +30,17 @@ export interface StoreMeta {
   indexedAt?: string;
 }
 
+/**
+ * Whether a store of this version can be brought forward in place.
+ *
+ * Versions from MIGRATABLE_FROM up added tables and nothing else, so running
+ * the DDL again is the whole migration. Anything older changed the shape of
+ * what was already there and is refused.
+ */
+export function migratable(version: number | undefined): boolean {
+  return typeof version === 'number' && version >= MIGRATABLE_FROM && version <= SCHEMA_VERSION;
+}
+
 function metaPath(dir: string): string {
   return path.join(dir, 'meta.json');
 }
@@ -40,7 +51,7 @@ export function readMeta(dir: string): StoreMeta {
     throw new Error(`No memory store at ${dir}. Run \`dai-memory init\` first.`);
   }
   const meta = JSON.parse(fs.readFileSync(file, 'utf8')) as StoreMeta;
-  if (meta.schemaVersion !== SCHEMA_VERSION) {
+  if (meta.schemaVersion !== SCHEMA_VERSION && !migratable(meta.schemaVersion)) {
     throw new Error(
       `Store schema version ${meta.schemaVersion} does not match this build (${SCHEMA_VERSION}). ` +
         `Re-run \`dai-memory init\` in a fresh directory rather than reading it as-is.`,

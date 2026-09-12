@@ -5,7 +5,7 @@ import type { MemoryStore } from './store/store.js';
 import { pendingCount } from './store/journal.js';
 import { summarizeCapability } from './store/capabilities.js';
 import { identityLabel, type EmbeddingIdentity } from './embed/types.js';
-import { probeAstChunking } from './ingest/languages.js';
+import { probeAstChunking, relationLanguages } from './ingest/languages.js';
 import { CHUNKER_VERSION } from './ingest/chunker.js';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
@@ -160,6 +160,32 @@ export async function doctor(
           ? `${olderReader}/${stamps.length} files were read by an older version of the code reader -- ` +
             'their chunks and code graph are out of date until `dai-memory ingest` re-reads them'
           : `v${CHUNKER_VERSION}, ${stamps.length} files`,
+    });
+
+    // The code graph, and what it could not resolve. A call whose name matched
+    // nothing or matched five things is not an edge, and the count is the only
+    // place that difference is visible.
+    const calls = await store.allCalls();
+    const pending = await store.countPendingCalls();
+    const languages = relationLanguages();
+    // A call into a framework is not a gap in the graph, and counting it as one
+    // made a working graph read as 5% complete. What matters is the share of
+    // calls into this repository's own code that found their declaration.
+    const ambiguous = await store.countAmbiguousCalls();
+    const internal = calls.length + ambiguous;
+    const reach = internal === 0 ? 100 : Math.round((calls.length / internal) * 100);
+    checks.push({
+      name: 'code graph',
+      status: !store.graphReady ? 'warn' : reach < 80 ? 'warn' : 'ok',
+      detail: !store.graphReady
+        ? 'this store predates the code graph; the next `dai-memory ingest` builds it'
+        : `${calls.length} call(s), ${(await store.allInherits()).length} inherit(s), ` +
+          `${(await store.allImports()).length} import(s); ${reach}% of calls into this repository resolved` +
+          (ambiguous > 0 ? `, ${ambiguous} ambiguous` : '') +
+          `; ${pending - ambiguous} call(s) go outside it` +
+          (languages.without.length > 0
+            ? ` -- no call extraction for ${languages.without.join(', ')}`
+            : ''),
     });
 
     const orphans = await store.orphanedMemories();

@@ -17,8 +17,13 @@ import { renderUi, type UiPayload } from './ui-template.js';
 /**
  * Past this the browser starts to struggle and the picture stops being readable.
  * `--max-nodes` moves it for a machine that copes; a path narrows it instead.
+ *
+ * Raised from 1,500 once the graph had call edges: a repository of 630 files
+ * and 4,933 declarations spent the whole budget on files and classes, and 46
+ * of its 4,188 calls had both ends drawn. A map of a system is mostly its
+ * methods, because that is where the calls are.
  */
-const MAX_GRAPH_NODES = 1500;
+const MAX_GRAPH_NODES = 3000;
 
 type UiOptions = { from?: string; out?: string; prefix?: string; maxNodes?: number };
 
@@ -65,6 +70,14 @@ export async function buildUi(
     const allEdges = await store.allEdges();
     const symbols = await store.symbolMap(options.prefix);
     const stats = await store.stats();
+    // The code graph proper: what calls what, what inherits what, what imports
+    // what. Read here so the picture is a map rather than a list of files that
+    // happen to be near each other.
+    const code = {
+      calls: await store.allCalls(),
+      inherits: await store.allInherits(),
+      imports: await store.allImports(),
+    };
 
     const contested = new Set<string>();
     for (const conflict of await conflicts(store)) {
@@ -96,7 +109,9 @@ export async function buildUi(
 
     // The page reports any cut; a silently shortened picture is a lie about the
     // shape of the graph.
-    const { graph, total, omitted } = buildGraph(memories, allEdges, symbols, options.maxNodes ?? MAX_GRAPH_NODES);
+    const { graph, total, omitted } = buildGraph(
+      memories, allEdges, symbols, code, options.maxNodes ?? MAX_GRAPH_NODES,
+    );
     const truncated = total > graph.nodes.length;
 
     const payload: UiPayload = {
@@ -107,6 +122,9 @@ export async function buildUi(
         edges: allEdges.length,
         symbols: symbols.length,
         files: new Set(symbols.map((symbol) => symbol.filePath)).size,
+        calls: code.calls.length,
+        inherits: code.inherits.length,
+        imports: code.imports.length,
       },
       health: report.checks.map((check) => ({
         name: check.name,
@@ -145,8 +163,9 @@ type SymbolRow = {
  *
  *   1. memories a person recorded -- decisions, constraints, what broke
  *   2. files with what they declare at the top: classes, interfaces, functions
- *   3. what those declare in turn: methods, properties
- *   4. chunks of the files themselves
+ *   3. the members that calls actually run between, most connected first
+ *   4. the remaining members
+ *   5. chunks of the files themselves
  *
  * The order used to be "memories first", which on a real repository meant
  * 7,567 chunks took every one of the 1,500 places and not one file or
@@ -156,10 +175,17 @@ type SymbolRow = {
  * A declaration hangs off the declaration that encloses it, not off the file,
  * so the graph shows OrderService holding Get instead of a file holding both.
  */
+interface CodeGraph {
+  calls: Array<{ from: string; to: string; name: string; line: number; confidence: string }>;
+  inherits: Array<{ from: string; to: string; confidence: string }>;
+  imports: Array<{ from: string; to: string; module: string }>;
+}
+
 function buildGraph(
   memories: UiPayload['memories'],
   edges: Array<{ from: string; to: string; type: string }>,
   symbols: SymbolRow[],
+  code: CodeGraph,
   budget: number,
 ): { graph: Graph; total: number; omitted: Record<string, number> } {
   const recorded = memories.filter((memory) => memory.layer !== 'artifact');
@@ -197,13 +223,27 @@ function buildGraph(
     detail: `${symbol.filePath}:${symbol.startLine}`,
   });
 
+  // A declaration at either end of a call earns its place before one that
+  // nothing reaches: the budget should be spent on the part of the graph that
+  // has edges, or the picture is a scatter of unconnected dots.
+  const degree = new Map<string, number>();
+  const count = (id: string) => degree.set(id, (degree.get(id) ?? 0) + 1);
+  for (const call of code.calls) { count(call.from); count(call.to); }
+  for (const item of code.inherits) { count(item.from); count(item.to); }
+  const wired = (a: SymbolRow, b: SymbolRow) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0);
+
+  // Members are ranked across the whole repository, not within each file: per
+  // file, the first files took every place and the rest of the map was blank.
+  const members = symbols.filter((symbol) => parentOf(symbol)).sort(wired);
+
   const tiers: GraphNode[][] = [
     recorded.map(memoryNode),
     files.flatMap((file) => [
       { id: `file:${file}`, label: file, kind: 'file', group: 'file' },
-      ...byFile.get(file)!.filter((symbol) => !parentOf(symbol)).map(symbolNode),
+      ...byFile.get(file)!.filter((symbol) => !parentOf(symbol)).sort(wired).map(symbolNode),
     ]),
-    files.flatMap((file) => byFile.get(file)!.filter((symbol) => parentOf(symbol)).map(symbolNode)),
+    members.filter((symbol) => degree.has(symbol.id)).map(symbolNode),
+    members.filter((symbol) => !degree.has(symbol.id)).map(symbolNode),
     chunks.map(memoryNode),
   ];
 
@@ -235,22 +275,49 @@ function buildGraph(
     }
   }
 
+  // The code graph's own edges. Only between nodes that were drawn: a link to
+  // something the budget left out would be a line into nothing.
+  for (const call of code.calls) {
+    if (present.has(call.from) && present.has(call.to)) {
+      links.push({ source: call.from, target: call.to, kind: 'CALLS', detail: call.confidence });
+    }
+  }
+  for (const item of code.inherits) {
+    if (present.has(item.from) && present.has(item.to)) {
+      links.push({ source: item.from, target: item.to, kind: 'INHERITS', detail: item.confidence });
+    }
+  }
+  for (const item of code.imports) {
+    const from = `file:${item.from}`;
+    const to = `file:${item.to}`;
+    if (present.has(from) && present.has(to)) {
+      links.push({ source: from, target: to, kind: 'IMPORTS', detail: item.module });
+    }
+  }
+
   const missing = (list: GraphNode[]) => list.filter((node) => !present.has(node.id)).length;
   const omitted: Record<string, number> = {
     'recorded memories': missing(tiers[0]!),
     files: missing(tiers[1]!.filter((node) => node.group === 'file')),
-    declarations: missing(tiers[1]!.filter((node) => node.group === 'symbol')) + missing(tiers[2]!),
-    chunks: missing(tiers[3]!),
+    declarations:
+      missing(tiers[1]!.filter((node) => node.group === 'symbol')) + missing(tiers[2]!) + missing(tiers[3]!),
+    chunks: missing(tiers[4]!),
   };
 
   // Every relation, drawn or not. A click is answered from these rather than
   // from the drawn links: once the budget left chunks out, their ABOUT links
   // went with them, and clicking a class on a real repository answered
   // "nothing is recorded" about code that had chunks all over it.
-  const relations: Graph['relations'] = { owner: {}, about: {} };
+  const relations: Graph['relations'] = { owner: {}, about: {}, calls: {}, calledBy: {} };
   for (const symbol of symbols) {
     relations.owner[symbol.id] = parentOf(symbol) ?? `file:${symbol.filePath}`;
     if (symbol.memories.length > 0) relations.about[symbol.id] = symbol.memories.map((memory) => memory.id);
+  }
+  // Both directions, for the two questions an impact answers: what does this
+  // reach, and what reaches this.
+  for (const call of code.calls) {
+    (relations.calls[call.from] ??= []).push(call.to);
+    (relations.calledBy[call.to] ??= []).push(call.from);
   }
   return { graph: { nodes, links, relations }, total, omitted };
 }

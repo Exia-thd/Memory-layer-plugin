@@ -5,6 +5,11 @@ import type { MemoryStore } from '../store/store.js';
 import type { Layer, MemoryNode } from '../types.js';
 import type { EmbeddingProvider } from '../embed/index.js';
 import { chunk, declarations, CHUNKER_VERSION } from './chunker.js';
+import { relationsIn } from './relations.js';
+import { ruleForFile } from './languages.js';
+import {
+  writeRelations, resolvePending, repoIndex, emptyRelationReport, type RelationReport,
+} from './resolve.js';
 import { redact } from './redact.js';
 import { loadMemIgnore, isIgnored, type MemIgnore } from './memignore.js';
 import { nodeId, contentHash } from '../util/ids.js';
@@ -44,6 +49,8 @@ export interface IngestReport {
   /** Chunks that read like a decision somebody already reasoned through. */
   candidates: DecisionCandidate[];
   redactions: { rule: string; count: number }[];
+  /** Calls, base types and imports resolved to the declaration they mean. */
+  relations: RelationReport;
 }
 
 export interface DecisionCandidate {
@@ -315,6 +322,22 @@ function looksLikeText(file: string): boolean {
  * writes one place and reads another is a pipeline that can be wired up wrong
  * and still look like it worked.
  */
+/**
+ * One file's write, where a failure costs that file and nothing else.
+ *
+ * Returning null rather than throwing is the point: the walk goes on, the file
+ * is counted as failed, and the report names the count. Nothing is written for
+ * it, so the next ingest reads it again.
+ */
+async function runFile<T>(relative: string, work: () => Promise<T>): Promise<T | null> {
+  try {
+    return await work();
+  } catch (err) {
+    log('warn', `not indexed: ${relative}`, err);
+    return null;
+  }
+}
+
 export async function ingest(
   store: MemoryStore,
   targets: string[],
@@ -323,7 +346,7 @@ export async function ingest(
   const report: IngestReport = {
     files: 0, skipped: 0, created: 0, refreshed: 0, embedded: 0, symbols: 0,
     removed: 0, superseded: 0, vanished: 0, symbolsRemoved: 0,
-    ignored: [], dense: [], candidates: [], redactions: [],
+    ignored: [], dense: [], candidates: [], redactions: [], relations: emptyRelationReport(),
   };
   const redactionTotals = new Map<string, number>();
   const meta = store.getMeta();
@@ -334,6 +357,12 @@ export async function ingest(
   const ignore = loadMemIgnore(projectRoot);
   const files = targets.flatMap((target) =>
     collectFiles(target, projectRoot, report.ignored, maxBytes, ignore));
+
+  // Every file the walk found, so an import can be matched against a path that
+  // this run may not be re-reading.
+  const index = repoIndex(files.map((file) => path.relative(projectRoot, file).split(path.sep).join('/')));
+  /** Names declared in this run, for the calls that had nothing to point at yet. */
+  const declaredThisRun: string[] = [];
 
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
@@ -452,7 +481,13 @@ export async function ingest(
     // that fails halfway leaves whole files done and the rest untouched, so the
     // next run picks up exactly where this one stopped.
     const fileHash = { ...fileHashes, [relative]: stamp };
-    const counts = await store.transact(async () => {
+    // One file, one transaction, and one failure.
+    //
+    // A statement that fails inside a transaction poisons it, so catching
+    // inside is not enough -- the commit fails too and the process ends. A
+    // repository of 1,186 files lost the whole ingest to one of them; now the
+    // file is counted and named, and the walk carries on.
+    const counts = await runFile(relative, async () => store.transact(async () => {
       let created = 0;
       let refreshed = 0;
       let embedded = 0;
@@ -504,6 +539,25 @@ export async function ingest(
       // nodes, all indexed, all answering the same query. Removed if nothing
       // points at them, superseded if something does -- a decision whose
       // DERIVED_FROM leads nowhere is worse than a stale chunk.
+      // What this file does to other code, replacing what it said last time.
+      // Inside the same transaction as its declarations: a call edge pointing
+      // at a declaration that was never written is the one state worth ruling
+      // out entirely.
+      const relations = await relationsIn(file, content);
+      try {
+        await writeRelations(
+          store,
+          { filePath: relative, language: ruleForFile(file).label, relations, declared, index },
+          report.relations,
+        );
+      } catch (err) {
+        // The graph is secondary to the memory. One file whose relations cannot
+        // be written must not cost the repository its ingest -- it is counted
+        // and named instead.
+        report.relations.failed += 1;
+        log('warn', `relations not recorded for ${relative}`, err);
+      }
+
       const stale = await store.staleArtifacts(relative, prepared.map((item) => item.node.id));
       const removable: string[] = [];
       const keepable: string[] = [];
@@ -515,7 +569,11 @@ export async function ingest(
       const superseded = await store.supersede(keepable);
 
       return { created, refreshed, embedded, symbols, removed, superseded, symbolsRemoved };
-    }, { fileHashes: fileHash, tokenizerVersion: TOKENIZER_VERSION });
+    }, { fileHashes: fileHash, tokenizerVersion: TOKENIZER_VERSION }));
+    if (!counts) {
+      report.relations.failed += 1;
+      continue;
+    }
 
     report.created += counts.created;
     report.refreshed += counts.refreshed;
@@ -525,6 +583,19 @@ export async function ingest(
     report.superseded += counts.superseded;
     report.symbolsRemoved += counts.symbolsRemoved;
     fileHashes[relative] = stamp;
+    for (const declaration of declared) declaredThisRun.push(declaration.name);
+  }
+
+  // A file read before the one it calls into had nothing to resolve against.
+  // Now that every file in this run has been read, those names get a second
+  // look -- otherwise a first ingest would leave edges missing purely because
+  // of the order the walk happened to take.
+  if (declaredThisRun.length > 0) {
+    await runFile('the second resolution pass', async () =>
+      store.transact(async () => {
+        await resolvePending(store, declaredThisRun, report.relations);
+        return null;
+      }));
   }
 
   await reclaimVanished(store, targets, projectRoot, fileHashes, report);
@@ -591,6 +662,7 @@ async function reclaimVanished(
       }
       removed += await store.deleteNodes(removable);
       superseded += await store.supersede(keepable);
+      await store.deleteFile(file);
       symbolsRemoved += await store.deleteSymbols(
         (await store.symbolsInFile(file)).map((symbol) => symbol.id),
       );

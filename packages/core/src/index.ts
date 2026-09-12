@@ -13,6 +13,10 @@ export {
 } from './ingest/chunker.js';
 export { redact, looksRedacted } from './ingest/redact.js';
 export {
+  relationsIn, type FileRelations, type CallSite, type ImportSite, type Heritage,
+} from './ingest/relations.js';
+export { type RelationReport, type Confidence } from './ingest/resolve.js';
+export {
   ingest,
   type IngestOptions,
   type IngestReport,
@@ -20,7 +24,10 @@ export {
   type IgnoreReason,
   DEFAULT_MAX_FILE_BYTES,
 } from './ingest/ingest.js';
-export { ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, type AstCapability } from './ingest/languages.js';
+export {
+  ruleForFile, KNOWN_LANGUAGES, probeAstChunking, isLanguageAvailable, relationLanguages,
+  type AstCapability,
+} from './ingest/languages.js';
 
 export * from './embed/index.js';
 

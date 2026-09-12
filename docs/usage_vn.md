@@ -106,8 +106,9 @@ astChunking        ok      web-tree-sitter -- 36 languages
 
 `embeddings WARN hash` nghĩa là model không nạp được và tìm kiếm đang chạy bằng
 bản dự phòng từ vựng. Vẫn dùng được, chỉ là không khớp được câu hỏi diễn đạt khác
-với văn bản. Lần chạy đầu tải khoảng 23 MB vào `<MEMORY_LAYER_HOME>/models`, mất
-chừng 25 giây.
+với văn bản. Model được tải ngay ở bước `init` — đo thật: **130 MB** cho
+`Xenova/paraphrase-multilingual-MiniLM-L12-v2`, vào `<MEMORY_LAYER_HOME>/models`.
+Máy nào đã chạy `init` một lần thì sau đó chạy offline được.
 
 Rồi mở trang nó vừa ghi:
 
@@ -264,6 +265,44 @@ thay vì `tree-sitter-wasms`, vì bản build của gói đó không nạp đư�
 chỉ parse đúng một lần mỗi process. Nguồn gốc và checksum từng file ghi trong
 README của thư mục đó.
 
+### Đoạn code này tác động tới đoạn nào
+
+Ngoài chuyện file khai báo gì, đồ thị còn ghi ba quan hệ: **gọi hàm**, **kế thừa**
+và **import**. Đây là thứ biến một danh sách khai báo thành một tấm bản đồ, và là
+thứ cho phép hook trước lúc commit trả lời "còn chỗ nào chạm tới cái này".
+
+Phần khó là phân giải cái tên, và ở đây làm được mà không cần type checker. Một
+lời gọi ghi `FindAsync`; nó là khai báo nào thì xét theo bốn luật, lần lượt, và
+**kết quả mang theo luật nào đã tìm ra nó**:
+
+| Mức chắc chắn | Nghĩa là |
+|---|---|
+| `file` | khai báo duy nhất mang tên đó trong chính file đang gọi |
+| `receiver` | phần đứng trước chấm chính là chủ sở hữu: `OrderMapper.ToDto` |
+| `import` | khớp duy nhất trong số các file mà file này import |
+| `unique` | khai báo duy nhất mang tên đó trong cả repo |
+
+Với C# và Java còn một luật nữa gánh phần lớn công việc: `using`/`import` trỏ tới
+một namespace trải trên nhiều file, nên khai báo nào nằm trong namespace mà file
+này nhìn thấy được thì tính là tới được qua import.
+
+**Nếu không luật nào chọn ra đúng một khai báo thì không ghi gì cả.** Hai class
+cùng có method `Save`, không có import nào tách bạch, không suy được kiểu của
+receiver: lời gọi đó bị tính là **mơ hồ** và được báo ra. Một vùng ảnh hưởng dựng
+trên phỏng đoán còn tệ hơn một vùng ảnh hưởng thừa nhận chỗ mình không biết.
+
+Còn lời gọi vào framework — `HasColumnName`, `ToList`, `Produces` — thì trỏ tới
+thứ repo này không hề khai báo. Loại đó được đếm riêng là **đi ra ngoài repo**, vì
+nó không phải lỗ hổng và sẽ không bao giờ nối được: đo trên một service C# thật,
+chúng chiếm đa số các điểm gọi, và gộp chung vào làm một đồ thị đang chạy tốt
+trông như mới hoàn thành 5%. `doctor` báo tỉ lệ trên **các lời gọi vào chính repo
+này**.
+
+Lời gọi đọc được ở 24 ngôn ngữ. Dart là ngoại lệ trong nhóm có khai báo: grammar
+của nó không có node lời gọi, chỉ có chuỗi selector, nên Dart có import và kế thừa
+nhưng chưa có lời gọi — `doctor` nêu đích danh nó, cùng bất kỳ ngôn ngữ nào khác ở
+tình trạng tương tự.
+
 ## Bốn thứ bạn thực sự sẽ chạy
 
 ### `dai-memory why <file|symbol>`
@@ -323,7 +362,7 @@ Một file HTML, dữ liệu nhúng sẵn. Không server, không bước build �
 dai-memory ui                     # ghi .memory/ui.html
 dai-memory ui src/store           # thu hẹp theo đường dẫn
 dai-memory ui --out graph.html    # chỗ nào tiện gửi cho người khác
-dai-memory ui --max-nodes 4000    # vẽ nhiều hơn mức mặc định 1500
+dai-memory ui --max-nodes 6000    # vẽ nhiều hơn mức mặc định 3000
 ```
 
 **Nó sinh ra lúc nào:** `dai-memory init` ghi nó, và mọi lần `ingest` hay `prune` có
@@ -340,8 +379,10 @@ refresh chỉ ra đúng ảnh chụp cũ — thứ làm mới nó là lần `ing
 `--no-ui` bỏ qua bước ghi lại cho lệnh nào không muốn trả cái giá đó, khoảng
 600 ms trên kho 638 node.
 
-Ba tab: đồ thị 3D gồm file, khai báo và ký ức về chúng; kho ký ức dạng bảng lọc
-được; và báo cáo `doctor`.
+Ba tab: bản đồ 3D của code — file, khai báo trong đó, lời gọi giữa chúng, cái gì
+kế thừa cái gì, file nào import file nào, và ký ức ghi cho bất kỳ thứ nào trong số
+đó; kho ký ức dạng bảng lọc được; và báo cáo `doctor`. Cạnh gọi hàm và kế thừa có
+mũi tên, rê chuột lên sẽ thấy nó được phân giải bằng luật nào.
 
 Khai báo treo vào khai báo bao nó: file giữ `OrderService`, và `OrderService`
 giữ `Get`.
@@ -364,9 +405,12 @@ trang **nói rõ hỏng ở đâu** thay vì hiện canvas trắng — đồ th�
 "trong này không có gì", một thông điệp khác hẳn và tệ hơn nhiều. Hai tab kia dữ
 liệu nằm inline nên chạy bình thường.
 
-Trên 1500 node, đồ thị bị cắt, và thứ tự **được giữ chỗ** là: ký ức do người ghi,
-rồi file cùng các khai báo cấp trên cùng của nó, rồi method và property, cuối cùng
-là các chunk của file. Phần bị cắt được **báo trên tab Health** kèm số lượng từng
+Trên 3000 node, đồ thị bị cắt, và thứ tự **được giữ chỗ** là: ký ức do người ghi,
+rồi file cùng các khai báo cấp trên cùng, rồi **các member mà lời gọi thật sự chạy
+qua** (cái nhiều cạnh nhất trước), rồi các member còn lại, cuối cùng là chunk. Trước
+khi sửa, ngân sách bị file và class ăn hết: trên repo 630 file, chỉ 46 trong 4.188
+lời gọi có đủ hai đầu được vẽ — bản đồ của một hệ thống chủ yếu nằm ở method, vì đó
+là nơi có lời gọi. Phần bị cắt được **báo trên tab Health** kèm số lượng từng
 loại, và mọi ký ức vẫn nằm đủ trong tab Memories. Chunk bị cắt trước vì trên một
 repo thật có hàng nghìn chunk: khi ký ức được giữ trước, 7 567 chunk chiếm hết
 1 500 chỗ và đồ thị không hiện nổi một file. Thu hẹp bằng đường dẫn, hoặc nâng giới

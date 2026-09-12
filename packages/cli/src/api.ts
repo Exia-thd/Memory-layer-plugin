@@ -1137,11 +1137,22 @@ export async function runEmbed(options: { from?: string; force?: boolean } = {})
       if (vector) pending.push({ id: node.id, vector });
     }
 
+    // The recorded capability is about this store, not about the run that
+    // created it. Embedding into a different space and leaving the old line in
+    // place had `doctor` reporting a hash fallback over vectors from the real
+    // model -- the store was fine and the report was wrong.
+    const capabilities = { ...store.getMeta().capabilities } as Record<string, unknown>;
+    const choice = await selectProvider(store.dimensions).catch(() => null);
+    if (choice) capabilities.embeddings = choice.capability;
+
     await store.transact(
       async () => {
         for (const { id, vector } of pending) await store.setEmbedding(id, vector, identity);
       },
-      { embedding: { model: identity.model, provider: identity.provider } },
+      {
+        embedding: { model: identity.model, provider: identity.provider },
+        capabilities: capabilities as never,
+      },
     );
 
     return { embedded: pending.length, skipped };

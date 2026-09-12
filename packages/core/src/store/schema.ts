@@ -4,7 +4,16 @@ import { EDGE_TYPES } from '../types.js';
  * Bumped whenever the DDL below changes shape. `doctor` compares it against the
  * value recorded in meta.json and refuses to guess.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 7;
+
+/**
+ * The oldest schema this build can open by adding to it.
+ *
+ * Every statement in `ddl` is `IF NOT EXISTS`, so a store written by an older
+ * build gains the new tables and keeps its rows. Refusing instead would throw
+ * away a store because a table it has never heard of is missing.
+ */
+export const MIGRATABLE_FROM = 4;
 
 /**
  * Vector width is a schema decision, not a runtime setting: it is baked into the
@@ -40,6 +49,31 @@ export function parseDimensions(raw: string | number | undefined | null): number
  * One store holds nodes, edges and vectors together (C1). There is no second
  * store and therefore no migration step between writing and reading.
  */
+/**
+ * What a migration has to do before the DDL runs again.
+ *
+ * `CREATE TABLE IF NOT EXISTS` adds a missing table and silently leaves an
+ * existing one alone -- including its columns. A store upgraded into version 6
+ * kept a PendingCall table with no `reason` column, and every write to it
+ * failed mid-ingest. Tables that are pure derived data are dropped here and
+ * rebuilt by the next read of each file; anything holding recorded memory is
+ * never on this list.
+ */
+export function migrationsTo(from: number): string[] {
+  const statements: string[] = [];
+  if (from < 6) statements.push('DROP TABLE IF EXISTS PendingCall');
+  if (from < 7) {
+    // The relation tables hang off File, so they go first. All three are read
+    // back from the files themselves on the next ingest.
+    statements.push(
+      'DROP TABLE IF EXISTS IMPORTS',
+      'DROP TABLE IF EXISTS DECLARES',
+      'DROP TABLE IF EXISTS File',
+    );
+  }
+  return statements;
+}
+
 export function ddl(dimensions: number): string[] {
   const statements: string[] = [
     `CREATE NODE TABLE IF NOT EXISTS Memory(
@@ -87,10 +121,11 @@ export function ddl(dimensions: number): string[] {
      )`,
   );
 
-  // The smallest code graph that earns its place: what a file declares, and
-  // which memory is about it. Deliberately no CALLS or IMPORTS -- cross-file
-  // resolution is a different project with a different lifecycle, and the join
-  // this needs is "which decision covers this function", not "what calls what".
+  // The code graph: what a file declares, which memory is about it, and what
+  // one declaration does to another. A call is stored with the confidence it
+  // was resolved at, because a name matched across a repository is a different
+  // claim from a name resolved through an import, and an impact report that
+  // cannot tell them apart is worse than no impact report.
   statements.push(
     `CREATE NODE TABLE IF NOT EXISTS Symbol(
         id STRING,
@@ -105,6 +140,44 @@ export function ddl(dimensions: number): string[] {
         FROM Memory TO Symbol,
         weight DOUBLE,
         created_at INT64
+     )`,
+    `CREATE NODE TABLE IF NOT EXISTS File(
+        path STRING,
+        language STRING,
+        container STRING,
+        uses STRING,
+        PRIMARY KEY(path)
+     )`,
+    `CREATE REL TABLE IF NOT EXISTS DECLARES(
+        FROM File TO Symbol
+     )`,
+    `CREATE REL TABLE IF NOT EXISTS CALLS(
+        FROM Symbol TO Symbol,
+        name STRING,
+        line INT64,
+        confidence STRING
+     )`,
+    `CREATE REL TABLE IF NOT EXISTS INHERITS(
+        FROM Symbol TO Symbol,
+        confidence STRING
+     )`,
+    `CREATE REL TABLE IF NOT EXISTS IMPORTS(
+        FROM File TO File,
+        module STRING
+     )`,
+    // Call sites whose name matched nothing, kept rather than dropped: a later
+    // ingest of the file that declares it resolves them, and until then the
+    // count is what `doctor` reports instead of implying the graph is complete.
+    `CREATE NODE TABLE IF NOT EXISTS PendingCall(
+        id STRING,
+        file_path STRING,
+        from_symbol STRING,
+        name STRING,
+        receiver STRING,
+        line INT64,
+        kind STRING,
+        reason STRING,
+        PRIMARY KEY(id)
      )`,
   );
 

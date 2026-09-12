@@ -310,7 +310,20 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
         // so replacing 4,729 stale chunks read exactly like adding nothing.
         (report.removed > 0 ? `, ${report.removed} removed` : '') +
         (report.superseded > 0 ? `, ${report.superseded} superseded` : '') +
-        (report.symbols > 0 ? `\ncode graph: ${report.symbols} declaration(s) recorded` : '') +
+        (report.symbols > 0
+          ? `\ncode graph: ${report.symbols} declaration(s), ${report.relations.calls} call(s), ` +
+            `${report.relations.inherits} inherit(s), ${report.relations.imports} import(s)` +
+            (report.relations.ambiguous > 0
+              ? `, ${report.relations.ambiguous} call(s) too ambiguous to place`
+              : '') +
+            (report.relations.external > 0
+              ? `, ${report.relations.external} call(s) into code outside the repository`
+              : '') +
+            (report.relations.failed > 0
+              ? `
+   ${report.relations.failed} file(s) whose relations could not be written`
+              : '')
+          : '') +
         (report.vanished > 0 ? `
 reclaimed ${report.vanished} file(s) no longer on disk` : '') +
         (report.symbolsRemoved > 0

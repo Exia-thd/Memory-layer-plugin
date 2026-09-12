@@ -17,17 +17,26 @@ const FORCE_GRAPH_3D = 'https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/
 export interface UiPayload {
   project: string;
   generatedAt: string;
-  stats: { nodes: number; edges: number; symbols: number; files: number };
+  stats: {
+    nodes: number; edges: number; symbols: number; files: number;
+    calls: number; inherits: number; imports: number;
+  };
   health: Array<{ name: string; status: string; detail: string }>;
   graph: {
     nodes: Array<{ id: string; label: string; kind: string; group: string; detail?: string }>;
-    links: Array<{ source: string; target: string; kind: string }>;
+    links: Array<{ source: string; target: string; kind: string; detail?: string }>;
     /**
      * Every declaration's relations, whether or not the budget drew it:
      * `owner` maps a declaration to what encloses it (a declaration or
      * `file:<path>`), `about` to the memories about it.
      */
-    relations: { owner: Record<string, string>; about: Record<string, string[]> };
+    relations: {
+      owner: Record<string, string>;
+      about: Record<string, string[]>;
+      /** What each declaration calls, and what calls it, whether drawn or not. */
+      calls: Record<string, string[]>;
+      calledBy: Record<string, string[]>;
+    };
   };
   memories: Array<{
     id: string;
@@ -85,6 +94,9 @@ export function renderUi(payload: UiPayload): string {
     --procedural: #bc4c00;
     --artifact: #1c6fd4;
     --link: #b9c9da;
+    --call: #1c6fd4;
+    --inherit: #7b3fd4;
+    --import: #1a7f37;
 
     --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
@@ -109,6 +121,9 @@ export function renderUi(payload: UiPayload): string {
     --procedural: #db6d28;
     --artifact: #58a6ff;
     --link: #30363d;
+    --call: #58a6ff;
+    --inherit: #a371f7;
+    --import: #3fb950;
   }
 
   * { box-sizing: border-box; }
@@ -135,6 +150,7 @@ export function renderUi(payload: UiPayload): string {
   .legend { position: absolute; left: 14px; bottom: 14px; padding: 10px 12px; font-size: 12px; }
   .legend div { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
   .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .line { width: 12px; height: 2px; border-radius: 1px; }
   .hint { position: absolute; right: 14px; top: 14px; color: var(--muted);
     font-size: 12px; padding: 8px 12px; }
   #fallback { display: none; padding: 40px; max-width: 620px; }
@@ -185,7 +201,7 @@ export function renderUi(payload: UiPayload): string {
 <body>
 <header>
   <h1>${escapeHtml(payload.project)}</h1>
-  <span class="sub">${payload.stats.nodes} memories · ${payload.stats.symbols} declarations · ${payload.stats.files} files · ${escapeHtml(payload.generatedAt.slice(0, 16).replace('T', ' '))}</span>
+  <span class="sub">${payload.stats.nodes} memories · ${payload.stats.symbols} declarations · ${payload.stats.files} files · ${payload.stats.calls} calls · ${payload.stats.imports} imports · ${escapeHtml(payload.generatedAt.slice(0, 16).replace('T', ' '))}</span>
   <nav role="tablist">
     <button role="tab" aria-selected="true" data-tab="graph">Graph</button>
     <button role="tab" aria-selected="false" data-tab="memories">Memories</button>
@@ -205,6 +221,9 @@ export function renderUi(payload: UiPayload): string {
       <div><span class="dot" style="background:var(--episodic)"></span> episodic</div>
       <div><span class="dot" style="background:var(--procedural)"></span> procedural</div>
       <div><span class="dot" style="background:var(--artifact)"></span> artifact</div>
+      <div><span class="line" style="background:var(--call)"></span> calls</div>
+      <div><span class="line" style="background:var(--inherit)"></span> inherits</div>
+      <div><span class="line" style="background:var(--import)"></span> imports</div>
     </div>
     <div id="fallback">
       <h2>The 3D view could not load</h2>
@@ -303,6 +322,14 @@ export function renderUi(payload: UiPayload): string {
   // ---- graph ----
   var graph = null;
 
+  function linkColor(link) {
+    if (link.kind === 'CONTRADICTS') return token('bad');
+    if (link.kind === 'CALLS') return token('call');
+    if (link.kind === 'INHERITS') return token('inherit');
+    if (link.kind === 'IMPORTS') return token('import');
+    return token('link');
+  }
+
   function colorFor(node) {
     return token(node.group === 'file' ? 'file' : node.group === 'symbol' ? 'symbol' : node.group)
       || token('muted');
@@ -313,7 +340,7 @@ export function renderUi(payload: UiPayload): string {
     // The canvas does not inherit CSS, so the theme has to be pushed into it.
     graph.backgroundColor(token('canvas'))
       .nodeColor(colorFor)
-      .linkColor(function (l) { return l.kind === 'CONTRADICTS' ? token('bad') : token('link'); });
+      .linkColor(linkColor);
   }
 
   if (window.__GRAPH_FAILED__ || typeof ForceGraph3D !== 'function') {
@@ -329,7 +356,10 @@ export function renderUi(payload: UiPayload): string {
       })
       .nodeLabel(function (n) { return n.label + (n.detail ? '\\n' + n.detail : ''); })
       .nodeVal(function (n) { return n.group === 'file' ? 6 : n.group === 'symbol' ? 3 : 2; })
-      .linkWidth(function (l) { return l.kind === 'CONTRADICTS' ? 2 : 0.5; })
+      .linkWidth(function (l) { return l.kind === 'CONTRADICTS' ? 2 : l.kind === 'CALLS' ? 1 : 0.5; })
+      .linkDirectionalArrowLength(function (l) { return l.kind === 'CALLS' || l.kind === 'INHERITS' ? 3 : 0; })
+      .linkDirectionalArrowRelPos(1)
+      .linkLabel(function (l) { return l.kind.toLowerCase() + (l.detail ? ' (' + l.detail + ')' : ''); })
       .linkOpacity(0.65)
       .onNodeClick(function (node) {
         var distance = 90;

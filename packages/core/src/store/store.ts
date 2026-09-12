@@ -5,7 +5,7 @@ import type { Database, Connection } from '@ladybugdb/core';
 import { nativeLbug } from './native.js';
 import type { MemoryNode, MemoryEdge, EdgeType, Layer, StoreStats, SymbolRow } from '../types.js';
 import { EDGE_TYPES, LAYERS, LAYER_WEIGHTS } from '../types.js';
-import { ddl, SCHEMA_VERSION } from './schema.js';
+import { ddl, migrationsTo, SCHEMA_VERSION } from './schema.js';
 import { readMeta, writeMeta, bumpWriteSeq, type StoreMeta } from './meta.js';
 import { log } from '../util/log.js';
 import { awaitHandleRelease } from './reopen.js';
@@ -130,6 +130,7 @@ export class MemoryStore {
 
     this.openedAtSeq = seq;
     this.meta = readMeta(this.dir);
+    if (!this.readOnly) await this.migrate();
     return this.conn;
   }
 
@@ -156,6 +157,36 @@ export class MemoryStore {
     this.conn = null;
     this.db = null;
     this.openedAtSeq = -1;
+  }
+
+  /**
+   * Adds what an older store is missing, in place.
+   *
+   * Every statement in the DDL is `IF NOT EXISTS`, so this is idempotent and
+   * costs a few statements on the first open after an upgrade. The alternative
+   * -- refusing to open -- throws away a store, and its recorded decisions,
+   * over a table that did not exist when it was written.
+   */
+  private async migrate(): Promise<void> {
+    const meta = this.meta!;
+    if (meta.schemaVersion === SCHEMA_VERSION) return;
+
+    for (const statement of migrationsTo(meta.schemaVersion)) await this.conn!.query(statement);
+    for (const statement of ddl(meta.dimensions)) await this.conn!.query(statement);
+    const upgraded = { ...meta, schemaVersion: SCHEMA_VERSION };
+    writeMeta(this.dir, upgraded);
+    this.meta = upgraded;
+    log('info', `store schema ${meta.schemaVersion} -> ${SCHEMA_VERSION}`);
+  }
+
+  /**
+   * Whether this handle can read the code-graph tables.
+   *
+   * A read-only handle cannot add them, so on a store written before they
+   * existed the graph reads as empty rather than throwing. `doctor` says so.
+   */
+  get graphReady(): boolean {
+    return this.getMeta().schemaVersion >= SCHEMA_VERSION;
   }
 
   async query(cypher: string): Promise<Record<string, unknown>[]> {
@@ -670,14 +701,39 @@ export class MemoryStore {
    * goes first: a relationship whose endpoint is gone is not something to leave
    * behind for a later query to trip over.
    */
+  /**
+   * Removes declarations the code no longer makes, edges first.
+   *
+   * A node with an edge still attached cannot be deleted, and the graph now
+   * hangs four kinds off a declaration: the memory about it, the file that
+   * declares it, what it calls and what calls it. Deleting only the first
+   * stopped every rename dead, mid-ingest.
+   */
   async deleteSymbols(ids: string[]): Promise<number> {
     let removed = 0;
     for (const id of ids) {
       await this.run('MATCH (:Memory)-[r:ABOUT]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
+      if (this.graphReady) {
+        await this.run('MATCH (:File)-[r:DECLARES]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
+        await this.run('MATCH (s:Symbol)-[r:CALLS]->() WHERE s.id = $id DELETE r', { id });
+        await this.run('MATCH ()-[r:CALLS]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
+        await this.run('MATCH (s:Symbol)-[r:INHERITS]->() WHERE s.id = $id DELETE r', { id });
+        await this.run('MATCH ()-[r:INHERITS]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
+      }
       await this.run('MATCH (s:Symbol) WHERE s.id = $id DELETE s', { id });
       removed += 1;
     }
     return removed;
+  }
+
+  /** Drops a file from the graph: its imports, its declares edge, then the row. */
+  async deleteFile(filePath: string): Promise<void> {
+    if (!this.graphReady) return;
+    await this.run('MATCH (f:File)-[r:IMPORTS]->() WHERE f.path = $path DELETE r', { path: filePath });
+    await this.run('MATCH ()-[r:IMPORTS]->(f:File) WHERE f.path = $path DELETE r', { path: filePath });
+    await this.run('MATCH (f:File)-[r:DECLARES]->() WHERE f.path = $path DELETE r', { path: filePath });
+    await this.run('MATCH (p:PendingCall) WHERE p.file_path = $path DELETE p', { path: filePath });
+    await this.run('MATCH (f:File) WHERE f.path = $path DELETE f', { path: filePath });
   }
 
   async hasEdges(id: string): Promise<boolean> {
@@ -828,6 +884,284 @@ export class MemoryStore {
       }
     }
     return [...bySymbol.values()];
+  }
+
+  /**
+   * The file row, which the code graph hangs off.
+   *
+   * Files are nodes in their own right because imports join files, not
+   * declarations, and because a file's namespace is what resolves a call in
+   * C# or Java to the right one of five classes that share a method name.
+   */
+  async upsertFile(file: {
+    path: string; language: string; container: string | null; uses?: string[];
+  }): Promise<void> {
+    const existing = await this.run('MATCH (f:File) WHERE f.path = $path RETURN f.path AS path', {
+      path: file.path,
+    });
+    const params = {
+      path: file.path,
+      language: file.language,
+      container: file.container ?? '',
+      // What this file can see, kept so a call can be resolved later without
+      // re-reading it. Resolution that needs the file open again is resolution
+      // that depends on the order the walk happened to take.
+      uses: (file.uses ?? []).join(' '),
+    };
+    if (existing.length > 0) {
+      await this.run(
+        `MATCH (f:File) WHERE f.path = $path
+         SET f.language = $language, f.container = $container, f.uses = $uses`,
+        params,
+      );
+      return;
+    }
+    await this.run(
+      'CREATE (f:File { path: $path, language: $language, container: $container, uses: $uses })',
+      params,
+    );
+  }
+
+  /** The namespaces each of these files can see, its own included. */
+  async visibleFor(paths: string[]): Promise<Map<string, string[]>> {
+    if (!this.graphReady || paths.length === 0) return new Map();
+    const rows = await this.run(
+      `MATCH (f:File) WHERE list_contains($paths, f.path)
+       RETURN f.path AS path, f.uses AS uses, f.container AS container`,
+      { paths },
+    );
+    const out = new Map<string, string[]>();
+    for (const row of rows as unknown as Array<{ path: string; uses: string; container: string }>) {
+      const seen = [...String(row.uses ?? '').split(' '), String(row.container ?? '')].filter(Boolean);
+      out.set(row.path, seen);
+    }
+    return out;
+  }
+
+  async linkDeclares(filePath: string, symbolId: string): Promise<void> {
+    const existing = await this.run(
+      'MATCH (f:File)-[r:DECLARES]->(s:Symbol) WHERE f.path = $path AND s.id = $id RETURN s.id AS id',
+      { path: filePath, id: symbolId },
+    );
+    if (existing.length > 0) return;
+    await this.run(
+      `MATCH (f:File), (s:Symbol) WHERE f.path = $path AND s.id = $id CREATE (f)-[:DECLARES]->(s)`,
+      { path: filePath, id: symbolId },
+    );
+  }
+
+  /**
+   * Everything a file said about other code, removed before it is read again.
+   *
+   * Relations belong to the file that wrote them, so re-reading a file replaces
+   * its own and touches nobody else's. Without this a renamed call kept its old
+   * edge and the graph slowly filled with calls the code no longer makes.
+   */
+  async clearRelationsFrom(filePath: string): Promise<void> {
+    await this.run(
+      'MATCH (s:Symbol)-[r:CALLS]->() WHERE s.file_path = $path DELETE r',
+      { path: filePath },
+    );
+    await this.run(
+      'MATCH (s:Symbol)-[r:INHERITS]->() WHERE s.file_path = $path DELETE r',
+      { path: filePath },
+    );
+    await this.run('MATCH (f:File)-[r:IMPORTS]->() WHERE f.path = $path DELETE r', { path: filePath });
+    await this.run('MATCH (p:PendingCall) WHERE p.file_path = $path DELETE p', { path: filePath });
+  }
+
+  async addCall(
+    from: string,
+    to: string,
+    detail: { name: string; line: number; confidence: string },
+  ): Promise<void> {
+    await this.run(
+      `MATCH (a:Symbol), (b:Symbol) WHERE a.id = $from AND b.id = $to
+       CREATE (a)-[:CALLS { name: $name, line: $line, confidence: $confidence }]->(b)`,
+      { from, to, name: detail.name, line: detail.line, confidence: detail.confidence },
+    );
+  }
+
+  async addInherits(from: string, to: string, confidence: string): Promise<void> {
+    await this.run(
+      `MATCH (a:Symbol), (b:Symbol) WHERE a.id = $from AND b.id = $to
+       CREATE (a)-[:INHERITS { confidence: $confidence }]->(b)`,
+      { from, to, confidence },
+    );
+  }
+
+  async addImport(from: string, to: string, module: string): Promise<void> {
+    await this.run(
+      `MATCH (a:File), (b:File) WHERE a.path = $from AND b.path = $to
+       CREATE (a)-[:IMPORTS { module: $module }]->(b)`,
+      { from, to, module },
+    );
+  }
+
+  /** A call whose name matched no declaration, kept so a later ingest can resolve it. */
+  async addPendingCall(row: {
+    id: string; filePath: string; fromSymbol: string; name: string; receiver: string | null;
+    line: number; kind: string; reason: string;
+  }): Promise<void> {
+    await this.run(
+      `CREATE (p:PendingCall {
+          id: $id, file_path: $filePath, from_symbol: $fromSymbol,
+          name: $name, receiver: $receiver, line: $line, kind: $kind, reason: $reason
+       })`,
+      { ...row, receiver: row.receiver ?? '' },
+    );
+  }
+
+  /**
+   * Call sites this repository declares a name for but could not place.
+   *
+   * The number that matters: a call into a framework will never resolve and is
+   * not a gap, but a call into this code that matched three declarations is.
+   */
+  async countAmbiguousCalls(): Promise<number> {
+    if (!this.graphReady) return 0;
+    const rows = await this.run(
+      "MATCH (p:PendingCall) WHERE p.reason = 'ambiguous' RETURN count(p) AS n", {},
+    );
+    return Number((rows[0]?.n as number | bigint | undefined) ?? 0);
+  }
+
+  /**
+   * A file row for a path this run may not be reading.
+   *
+   * An import points at a file that exists on disk but whose turn in the walk
+   * has not come. Without a row for it the edge silently matched nothing: the
+   * import was counted and never written.
+   */
+  async ensureFile(filePath: string, language: string): Promise<void> {
+    const existing = await this.run('MATCH (f:File) WHERE f.path = $path RETURN f.path AS path', {
+      path: filePath,
+    });
+    if (existing.length > 0) return;
+    await this.run(
+      "CREATE (f:File { path: $path, language: $language, container: '', uses: '' })",
+      { path: filePath, language },
+    );
+  }
+
+  async pendingCallsNamed(names: string[]): Promise<Array<{
+    id: string; filePath: string; fromSymbol: string; name: string; receiver: string;
+    line: number; kind: string;
+  }>> {
+    if (names.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (p:PendingCall) WHERE list_contains($names, p.name)
+       RETURN p.id AS id, p.file_path AS filePath, p.from_symbol AS fromSymbol,
+              p.name AS name, p.receiver AS receiver, p.line AS line, p.kind AS kind`,
+      { names },
+    );
+    return rows as unknown as Array<{
+      id: string; filePath: string; fromSymbol: string; name: string; receiver: string;
+      line: number; kind: string;
+    }>;
+  }
+
+  async deletePendingCalls(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await this.run('MATCH (p:PendingCall) WHERE p.id = $id DELETE p', { id });
+    }
+  }
+
+  async countPendingCalls(): Promise<number> {
+    if (!this.graphReady) return 0;
+    const rows = await this.run('MATCH (p:PendingCall) RETURN count(p) AS n', {});
+    return Number((rows[0]?.n as number | bigint | undefined) ?? 0);
+  }
+
+  /** Declarations by exact name, for resolving a call site against the repository. */
+  async symbolsNamed(names: string[]): Promise<SymbolRow[]> {
+    if (names.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (s:Symbol) WHERE list_contains($names, s.name)
+       RETURN s.id AS id, s.name AS name, s.file_path AS filePath, s.kind AS kind,
+              s.start_line AS startLine, s.end_line AS endLine`,
+      { names },
+    );
+    return rows as unknown as SymbolRow[];
+  }
+
+  async filesWithContainer(containers: string[]): Promise<Array<{ path: string; container: string }>> {
+    if (containers.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (f:File) WHERE list_contains($containers, f.container)
+       RETURN f.path AS path, f.container AS container`,
+      { containers },
+    );
+    return rows as unknown as Array<{ path: string; container: string }>;
+  }
+
+  /** The namespace or package each of these files declares. */
+  async containersFor(paths: string[]): Promise<Map<string, string>> {
+    if (!this.graphReady || paths.length === 0) return new Map();
+    const rows = await this.run(
+      `MATCH (f:File) WHERE list_contains($paths, f.path) AND f.container <> ''
+       RETURN f.path AS path, f.container AS container`,
+      { paths },
+    );
+    return new Map((rows as unknown as Array<{ path: string; container: string }>)
+      .map((row) => [row.path, row.container]));
+  }
+
+  async allFiles(): Promise<Array<{ path: string; language: string; container: string }>> {
+    if (!this.graphReady) return [];
+    const rows = await this.run(
+      'MATCH (f:File) RETURN f.path AS path, f.language AS language, f.container AS container',
+      {},
+    );
+    return rows as unknown as Array<{ path: string; language: string; container: string }>;
+  }
+
+  /** Every recorded call, for the viewer and for impact reports. */
+  async allCalls(): Promise<Array<{ from: string; to: string; name: string; line: number; confidence: string }>> {
+    if (!this.graphReady) return [];
+    const rows = await this.run(
+      `MATCH (a:Symbol)-[r:CALLS]->(b:Symbol)
+       RETURN a.id AS from, b.id AS to, r.name AS name, r.line AS line, r.confidence AS confidence`,
+      {},
+    );
+    return rows as unknown as Array<{ from: string; to: string; name: string; line: number; confidence: string }>;
+  }
+
+  async allInherits(): Promise<Array<{ from: string; to: string; confidence: string }>> {
+    if (!this.graphReady) return [];
+    const rows = await this.run(
+      'MATCH (a:Symbol)-[r:INHERITS]->(b:Symbol) RETURN a.id AS from, b.id AS to, r.confidence AS confidence',
+      {},
+    );
+    return rows as unknown as Array<{ from: string; to: string; confidence: string }>;
+  }
+
+  async allImports(): Promise<Array<{ from: string; to: string; module: string }>> {
+    if (!this.graphReady) return [];
+    const rows = await this.run(
+      'MATCH (a:File)-[r:IMPORTS]->(b:File) RETURN a.path AS from, b.path AS to, r.module AS module',
+      {},
+    );
+    return rows as unknown as Array<{ from: string; to: string; module: string }>;
+  }
+
+  /**
+   * Who calls this declaration, and what it calls, one hop out.
+   *
+   * The join an impact question needs: change this, and these are the places
+   * that reach it. Confidence rides along so the answer can say how sure it is.
+   */
+  async neighboursOf(symbolIds: string[]): Promise<Array<{
+    from: string; to: string; name: string; line: number; confidence: string;
+  }>> {
+    if (!this.graphReady || symbolIds.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (a:Symbol)-[r:CALLS]->(b:Symbol)
+       WHERE list_contains($ids, a.id) OR list_contains($ids, b.id)
+       RETURN a.id AS from, b.id AS to, r.name AS name, r.line AS line, r.confidence AS confidence`,
+      { ids: symbolIds },
+    );
+    return rows as unknown as Array<{ from: string; to: string; name: string; line: number; confidence: string }>;
   }
 
   async symbolsInFile(filePath: string): Promise<SymbolRow[]> {
