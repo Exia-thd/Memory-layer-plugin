@@ -106,7 +106,7 @@ test('a file read by an older code reader is read again, not skipped as unchange
   // Unchanged content used to mean skip. A C# repository ingested before C#
   // had a code graph kept its empty graph forever: every file was unchanged.
   const source = [
-    'namespace Inventory.Api',
+    'namespace Billing.Api',
     '{',
     '    public class OrderService',
     '    {',

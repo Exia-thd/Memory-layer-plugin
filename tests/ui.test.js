@@ -227,7 +227,7 @@ test('a method hangs off its class, and clicking the class finds what is about i
   const methods = Array.from({ length: 12 }, (_, i) =>
     `    public Order Load${i}(int id)\n    {\n        // step ${i}: validate, then fetch the order row\n        return _repo.Find(id);\n    }\n`).join('\n');
   const repo = makeRepo({
-    'src/OrderService.cs': `namespace Inventory.Api;\n\npublic class OrderService\n{\n${methods}}\n`,
+    'src/OrderService.cs': `namespace Billing.Api;\n\npublic class OrderService\n{\n${methods}}\n`,
   });
   try {
     cli(repo, ['init', '--no-scan']);

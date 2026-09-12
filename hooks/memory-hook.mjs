@@ -210,6 +210,9 @@ async function preCommit(cwd, payload) {
   const lines = ['Project memory covers files in this commit:'];
   for (const entry of report.covered ?? []) {
     lines.push(`  ${entry.file}`);
+    for (const memory of (entry.viaCalls ?? []).slice(0, 2)) {
+      lines.push(`  [${memory.layer}] ${memory.title} (via a call into ${memory.reaches})`);
+    }
     for (const memory of entry.memories.slice(0, 3)) {
       lines.push(`    - [${memory.layer}] ${memory.title}${memory.contested ? ' (CONTESTED)' : ''}`);
     }

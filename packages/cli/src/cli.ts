@@ -507,6 +507,12 @@ reclaimed ${report.vanished} file(s) no longer on disk` : '') +
           if (entry.omitted > 0) {
             lines.push(`    ... and ${entry.omitted} more, not shown`);
           }
+          // Recorded about code that calls in here, not about this file. Marked
+          // as such: it is a weaker claim than a decision about the file itself.
+          for (const memory of entry.viaCalls ?? []) {
+            lines.push(`    [${memory.layer}] ${memory.title}`);
+            lines.push(`        via a call into ${memory.reaches} -- ${memory.sourceRef}`);
+          }
         }
         if (report.uncovered.length > 0) {
           lines.push(`${report.uncovered.length} changed file(s) with nothing recorded:`);

@@ -298,10 +298,21 @@ chúng chiếm đa số các điểm gọi, và gộp chung vào làm một đ�
 trông như mới hoàn thành 5%. `doctor` báo tỉ lệ trên **các lời gọi vào chính repo
 này**.
 
-Lời gọi đọc được ở 24 ngôn ngữ. Dart là ngoại lệ trong nhóm có khai báo: grammar
-của nó không có node lời gọi, chỉ có chuỗi selector, nên Dart có import và kế thừa
-nhưng chưa có lời gọi — `doctor` nêu đích danh nó, cùng bất kỳ ngôn ngữ nào khác ở
-tình trạng tương tự.
+Lời gọi đọc được ở **mọi ngôn ngữ có khai báo — cả 29**. Grammar của Dart không có
+node lời gọi, chỉ có chuỗi selector, nên luật của nó đọc ngược tên hàm từ danh sách
+tham số; SystemRDL thì không có khái niệm gọi hàm, nên việc khởi tạo component được
+đọc như một lời gọi khởi tạo.
+
+**Đồ thị này dùng để làm gì.** Có hai chỗ đi theo nó, mỗi lần một bước:
+
+- **Hỏi về một khai báo** thì trả về cả ký ức ghi cho những khai báo mà nó gọi và
+  những khai báo gọi nó. Lý do một hàm trả về null thay vì ném lỗi thường được ghi
+  ở chỗ có người dựa vào điều đó — tức là ở phía gọi. Ký ức tới được qua cạnh gọi
+  xếp sau mọi kết quả trực tiếp, vì "ghi cho chính nó" và "ghi cho thứ nó gọi" là
+  hai khẳng định khác nhau.
+- **Bước kiểm trước commit** báo cả quyết định ghi ở **nơi gọi vào** những file bạn
+  vừa sửa, kèm tên khai báo mà nó chạm tới. Trước đây sửa hàm bị gọi thì không thấy
+  gì, dù ràng buộc ở phía gọi đã được ghi rõ.
 
 ## Bốn thứ bạn thực sự sẽ chạy
 

@@ -103,11 +103,11 @@ astChunking        ok      web-tree-sitter -- 36 languages
 
 `embeddings WARN hash` means the model did not load and search is running on a
 lexical fallback. It still works; it just cannot match a question phrased
-differently from the text. The first run downloads about 23 MB into
-`<MEMORY_LAYER_HOME>/models`. Measured: 130 MB for
+differently from the text. The model is downloaded by `init` itself, into
+`<MEMORY_LAYER_HOME>/models` -- measured at 130 MB for
 `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, a minute or two on a home
-connection. `init` does that download, so a machine that has run `init` once is
-ready offline afterwards.
+connection. A machine that has run `init` once works offline afterwards, and
+the cache can be copied to another machine.
 
 Then load the project:
 
@@ -281,10 +281,23 @@ on a real C# service, they are the large majority of call sites, and counting
 them as failures made a working graph read as 5% complete. `doctor` reports the
 share of calls *into this repository* that found their declaration.
 
-Calls are read from 24 languages. Dart is the exception among the languages
-that have declarations: its grammar has no call node, only a chain of
-selectors, so Dart contributes imports and base types but no calls -- `doctor`
-names it, along with any other language in the same position.
+Calls are read from every language that has declarations -- all 29 of them.
+Dart's grammar has no call node, only a chain of selectors, so its rule reads
+the name backwards from the argument list; SystemRDL has no calls at all, and
+its component instantiations are read as constructions instead.
+
+**What the graph is for.** Two places follow it, one hop:
+
+- **Asking about a declaration** also returns what was recorded about the
+  declarations it calls and the ones that call it. The reason a function
+  returns null instead of throwing is usually written where somebody relied on
+  it -- at the caller. Reached memories rank after every direct hit, because
+  "recorded about this" and "recorded about something this calls" are different
+  claims.
+- **The commit check** reports decisions recorded about code that calls into
+  the files you changed, each marked with the declaration it reaches. Editing a
+  callee used to show nothing, however carefully the caller's constraint had
+  been written down.
 
 ## The four things you will actually run
 

@@ -377,6 +377,26 @@ async function entityBranch(
 
   try {
     const found = await store.nodesAboutSymbolNames(terms, limit * 2);
+
+    // One hop along the code graph.
+    //
+    // A decision about a function is often recorded against what it calls, or
+    // against its caller: "this returns null rather than throwing, because the
+    // caller treats null as empty". Asking about one of them and being handed
+    // nothing, while the answer sits one edge away, is the gap the call graph
+    // exists to close. Reached memories rank after every direct hit, because
+    // "recorded about this" and "recorded about something this calls" are
+    // different claims and the order says which is which.
+    const direct = new Set(found.map((node) => node.id));
+    const named = await store.symbolIdsNamed(terms);
+    const neighbours = new Set<string>();
+    for (const edge of await store.neighboursOf(named)) {
+      if (!named.includes(edge.from)) neighbours.add(edge.from);
+      if (!named.includes(edge.to)) neighbours.add(edge.to);
+    }
+    const reached = (await store.nodesAboutSymbolIds([...neighbours], limit))
+      .filter((node) => !direct.has(node.id));
+    found.push(...reached);
     return found.length > 0
       ? { name: 'entity', ranked: found.map((node) => node.id) }
       : {

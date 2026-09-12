@@ -104,7 +104,7 @@ test('a class bigger than one chunk is cut between its members, with doc comment
   const source = [
     'using System;',
     '',
-    'namespace Inventory.Api.Services',
+    'namespace Billing.Api.Services',
     '{',
     '    public sealed class OrderService : IOrderService',
     '    {',
@@ -131,7 +131,7 @@ test('a class bigger than one chunk is cut between its members, with doc comment
 
 test('data formats are cut on their own structure, losing and repeating no line', async () => {
   const json = JSON.stringify({
-    name: 'inventory-web',
+    name: 'web-client',
     scripts: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`task${i}`, `node scripts/task${i}.js --flag ${i}`])),
     dependencies: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`pkg-${i}`, `^${i}.0.0`])),
   }, null, 2);

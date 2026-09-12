@@ -21,8 +21,12 @@ import { relationsIn } from '@memory-layer/core';
 import { RELATION_SAMPLES } from './fixtures/relation-samples.js';
 import { makeRepo, cli } from './helpers.js';
 
-/** Languages whose grammar gives no call node; they still import and inherit. */
-const NO_CALLS = new Set(['a.dart']);
+/**
+ * Every code language in the fixture reads calls. Dart was the exception until
+ * its rule learned to read the name backwards from the argument list, since its
+ * grammar has no call node of its own.
+ */
+const NO_CALLS = new Set();
 
 test('every language reads its calls, imports and base types', async () => {
   const failures = [];
@@ -30,10 +34,13 @@ test('every language reads its calls, imports and base types', async () => {
     const found = await relationsIn(file, source);
     const problems = [];
     if (!NO_CALLS.has(file) && found.calls.length === 0) problems.push('no calls');
-    if (found.imports.length === 0 && file !== 'a.zig') problems.push('no imports');
+    // Zig imports with a builtin (`@import`), which is not an import statement.
+    if (found.imports.length === 0 && !['a.zig', 'a.tla'].includes(file)) problems.push('no imports');
     // A call must name a declaration, not a keyword or a receiver.
     for (const call of found.calls) {
-      if (!/^[A-Za-z_$][\w$]*$/.test(call.name)) problems.push(`odd call name ${JSON.stringify(call.name)}`);
+      // One token, in any of these languages' shapes: `repo-find-by-id` in
+      // Lisp and Elm, `save!` and `valid?` in Ruby.
+      if (!/^[A-Za-z_$][\w$-]*[?!]?$/.test(call.name)) problems.push(`odd call name ${JSON.stringify(call.name)}`);
       if (call.line < 1) problems.push('call with no line');
     }
     if (problems.length > 0) failures.push(`${file}: ${problems.join(', ')}`);
@@ -53,9 +60,9 @@ test('a call is attributed to the declaration it was written in, and to the inne
 });
 
 const CSHARP_SERVICE = `using System;
-using Inventory.Domain;
+using Billing.Domain;
 
-namespace Inventory.Api
+namespace Billing.Api
 {
     public class OrderService
     {
@@ -70,7 +77,7 @@ namespace Inventory.Api
     }
 }
 `;
-const CSHARP_DOMAIN = `namespace Inventory.Domain
+const CSHARP_DOMAIN = `namespace Billing.Domain
 {
     public class OrderRepository
     {
@@ -102,12 +109,13 @@ test('ingest resolves calls across files and says how sure it is', () => {
     assert.equal(report.relations.ambiguous, 0, 'a call this repository declares was left unplaced');
     assert.equal(report.relations.external, 0, 'a call into this repository was counted as external');
 
-    // Each confidence is a different claim, and each is used here: `Validate`
+    // Each confidence is a different claim, and three are used here: `Validate`
     // is declared in the calling file, `ToDto` is reached through its owner,
-    // `FindById` through the namespace the file imports.
+    // and `FindById` through the type `_repo` was declared with. The namespace
+    // rule has a test of its own below.
     assert.deepEqual(
       Object.keys(report.relations.byConfidence).sort(),
-      ['file', 'import', 'receiver'],
+      ['file', 'receiver', 'type'],
       JSON.stringify(report.relations.byConfidence),
     );
   } finally {
@@ -197,6 +205,67 @@ test('a store written before the code graph gains it instead of being refused', 
     assert.ok(report.relations.calls > 0, 'the migrated store recorded no calls');
     const after = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
     assert.ok(after.schemaVersion > 4, `the store was not brought forward: ${after.schemaVersion}`);
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a receiver declared with a type resolves a name many classes share', () => {
+  // Two classes declare `Save`, so the name alone is ambiguous and the
+  // namespace does not separate them either. The field's declared type does.
+  const repo = seeded({
+    'src/OrderRepo.cs': 'namespace P { public class OrderRepository { public void Save() { } } }\n',
+    'src/AuditRepo.cs': 'namespace P { public class AuditRepository { public void Save() { } } }\n',
+    'src/Caller.cs': [
+      'namespace P',
+      '{',
+      '    public class Service',
+      '    {',
+      '        private readonly OrderRepository _repo;',
+      '        public void Run() { _repo.Save(); }',
+      '    }',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  try {
+    const report = JSON.parse(cli(repo, ['ingest', 'src', '--json']));
+    assert.equal(
+      report.relations.byConfidence.type, 1,
+      `the declared type did not resolve the call: ${JSON.stringify(report.relations)}`,
+    );
+    assert.equal(report.relations.ambiguous, 0, 'the call stayed ambiguous');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('a namespace the file imports picks between two declarations of a name', () => {
+  // Nothing else can separate these: same name, no receiver to type, both
+  // outside the calling file. The `using` is the only evidence, and it is
+  // enough because only one of them is in the namespace it names.
+  const repo = seeded({
+    'src/Tools.cs': 'namespace Billing.Domain { public static class Tools { public static void Compute() { } } }\n',
+    'src/Other.cs': 'namespace Other.Place { public static class Helpers { public static void Compute() { } } }\n',
+    'src/Caller.cs': [
+      'using Billing.Domain;',
+      '',
+      'namespace Billing.Callers',
+      '{',
+      '    public class Runner',
+      '    {',
+      '        public void Run() { Compute(); }',
+      '    }',
+      '}',
+      '',
+    ].join('\n'),
+  });
+  try {
+    const report = JSON.parse(cli(repo, ['ingest', 'src', '--json']));
+    assert.ok(
+      report.relations.byConfidence.import >= 1,
+      `the namespace did not decide it: ${JSON.stringify(report.relations)}`,
+    );
   } finally {
     repo.cleanup();
   }

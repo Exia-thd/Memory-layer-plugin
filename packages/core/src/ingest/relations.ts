@@ -24,13 +24,22 @@ export interface CallSite {
   name: string;
   /** What it was called on -- `_repo` -- when the grammar shows a receiver. */
   receiver: string | null;
+  /**
+   * The type that receiver was declared with, when the file says so:
+   * `private readonly OrderRepository _repo` makes this `OrderRepository`.
+   *
+   * This is the one piece of type information available without a type
+   * checker, and it is what tells `_repo.FindById` from the thirty other
+   * classes declaring `FindById`.
+   */
+  receiverType: string | null;
   /** `new Order()` rather than `order.Save()`: the name is a type, not a method. */
   construction: boolean;
   line: number;
 }
 
 export interface ImportSite {
-  /** The module as written: `./repository.js`, `java.util.List`, `Inventory.Domain`. */
+  /** The module as written: `./repository.js`, `java.util.List`, `Billing.Domain`. */
   module: string;
   line: number;
 }
@@ -139,6 +148,8 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
   const containers = new Set(relations.container ?? []);
 
   const found: FileRelations = { calls: [], imports: [], heritage: [], container: null };
+  /** name -> the type it was declared with, for the whole file. */
+  const typed = new Map<string, string>();
 
   // Innermost declaration covering a line, so a call is attributed to the method
   // it sits in rather than to the class around it.
@@ -153,15 +164,17 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
     const node = stack.pop()!;
     const line = node.startPosition.row + 1;
 
-    if (calls.has(node.type)) {
-      const callee = pick(node, relations.calleeFields ?? ['function']) ?? firstNamed(node);
+    if (calls.has(node.type) && !isLispSyntax(node, rule)) {
+      const callee = rule.label === 'dart'
+        ? dartCallee(node)
+        : pick(node, relations.calleeFields ?? ['function']) ?? firstNamed(node);
       const name = callee ? lastName(callee) : null;
 
       // Several languages import by calling: Ruby's `require`, Lua's
       // `require`, JavaScript's `require`, Elixir's `alias` and `import`. The
       // call is the import statement, so it is read as one.
       if (name && (relations.importCalls ?? []).includes(name)) {
-        const argument = firstString(node);
+        const argument = firstString(node, true);
         if (argument) found.imports.push({ module: argument, line });
       } else if (name && (relations.ignoreCallees ?? []).includes(name)) {
         // `def get(id) do ... end` is a call to `def` whose arguments are the
@@ -179,6 +192,7 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
           // Java hangs the receiver off the invocation, JavaScript off the
           // callee expression; both are asked.
           receiver: receiverOf(node) ?? (callee ? receiverOf(callee) : null),
+          receiverType: null,
           construction: constructs.has(node.type),
           line,
         });
@@ -196,6 +210,17 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
       if (name?.text) found.container = name.text.trim();
     }
 
+    // Anything declared with a type: a field, a parameter, a local. The
+    // grammars agree on the shape more than they agree on the node name -- a
+    // `type` field beside a name -- so it is read by shape.
+    const declaredType = node.childForFieldName?.('type');
+    if (declaredType) {
+      const typeName = lastName(declaredType);
+      if (typeName && !RESERVED_TYPE.test(typeName)) {
+        for (const name of declaredNames(node)) typed.set(name, typeName);
+      }
+    }
+
     // Some grammars give no node for the base list at all: Python hangs it off
     // the class as a field, Rust puts the trait on the impl. Asked by field,
     // because the node they point at is an argument list like any other.
@@ -210,6 +235,12 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
     for (const child of node.namedChildren ?? []) stack.push(child);
   }
 
+  // What each receiver was declared as. Filled in after the walk because a
+  // field can be declared below the method that uses it.
+  for (const call of found.calls) {
+    if (call.receiver) call.receiverType = typed.get(call.receiver) ?? null;
+  }
+
   // In file order: the walk is a stack, and a caller reading a diff should see
   // relations in the order the lines are written.
   found.calls.sort((a, b) => a.line - b.line);
@@ -218,7 +249,36 @@ function collect(root: Node, rule: LanguageRule, declared: Declaration[]): FileR
   return found;
 }
 
-const NAME_NODE = /(^|_)(identifier|name)$|^(constant|word)$/;
+const NAME_NODE = /(^|_)(identifier|name)(_ref)?$|^(constant|word|symbol|literalId|id)$/;
+
+/** `var`, `void`, `int`: a type, but not one this repository declares. */
+const RESERVED_TYPE = /^(var|void|int|long|short|byte|char|bool|boolean|float|double|decimal|string|object|any|unknown|never|dynamic|auto|let|const|final|self|this)$/i;
+
+/**
+ * The names a declaration introduces: the identifiers beside its type.
+ *
+ * `private readonly OrderRepository _repo;` reaches `_repo` through a
+ * declarator; `id: string` is the identifier itself. Both shapes are common
+ * enough that this looks one level down rather than naming node types.
+ */
+function declaredNames(node: Node): string[] {
+  const names: string[] = [];
+  for (const child of node.namedChildren ?? []) {
+    if (NAME_NODE.test(child.type)) {
+      const name = clean(child.text);
+      if (name) names.push(name);
+      continue;
+    }
+    if (/declarator|variable|pattern/i.test(child.type)) {
+      for (const inner of child.namedChildren ?? []) {
+        if (!NAME_NODE.test(inner.type)) continue;
+        const name = clean(inner.text);
+        if (name) names.push(name);
+      }
+    }
+  }
+  return names;
+}
 
 /** The last name in a callee expression: `FindAsync` out of `this._repo.FindAsync`. */
 function lastName(node: Node): string | null {
@@ -287,12 +347,17 @@ function firstNamed(node: Node): Node | null {
 }
 
 /** The first string literal under a node: the module a require-style import names. */
-function firstString(node: Node): string | null {
-  const stack = [...(node.namedChildren ?? [])];
+function firstString(node: Node, skipHead = false): string | null {
+  // `skipHead` is for an import written as a call: in `(require
+  // 'billing-domain)` the first symbol is the callee, and taking it made every
+  // Lisp file import something called `require`. An import statement keeps its
+  // head, or Dart's `import 'package:...'` loses the only thing in it.
+  const stack = [...(node.namedChildren ?? []).slice(skipHead ? 1 : 0)];
   while (stack.length > 0) {
     const current = stack.shift()!;
-    // A string in most languages, a bare word in a shell: `source ./lib.sh`.
-    if (/string|literal|alias|module|word/i.test(current.type) && current.text) {
+    // A string in most languages, a bare word in a shell (`source ./lib.sh`),
+    // a quoted symbol in Lisp (`(require 'billing-domain)`).
+    if (/string|literal|alias|module|word|symbol/i.test(current.type) && current.text) {
       const text = current.text.trim().replace(/^["'`:]+|["'`]+$/g, '');
       if (text.length > 0 && text.length < 400 && !/\s/.test(text)) return text;
     }
@@ -305,11 +370,66 @@ function firstString(node: Node): string | null {
 function clean(text: string | undefined): string | null {
   if (!text) return null;
   const last = text.trim().replace(/<.*$/s, '').split(/[.:]/).pop() ?? '';
-  return /^[A-Za-z_$][\w$]{0,127}$/.test(last) ? last : null;
+  // Hyphens belong to Lisp and Elm names, `?` and `!` to Ruby's. Without them
+  // `repo-find-by-id` was read as no name at all.
+  return /^[A-Za-z_$][\w$-]{0,126}[?!]?$/.test(last) ? last : null;
+}
+
+/**
+ * Lisp lists that are syntax rather than calls.
+ *
+ * Everything in Emacs Lisp is a list, including a function's parameters and a
+ * `let`'s bindings. Read as calls they filled the graph with calls to `id` and
+ * to every local variable in the file.
+ */
+function isLispSyntax(node: Node, rule: LanguageRule): boolean {
+  if (rule.label !== 'elisp') return false;
+  const parent = node.parent ?? null;
+  if (!parent) return false;
+
+  // `(defun f (id) body)` -- the parameters, by name. The body is a direct
+  // child of the definition too, so "any list under a definition" threw away
+  // every call a function made.
+  const parameters = parent.childForFieldName?.('parameters');
+  if (parameters && parameters.id === node.id) return true;
+
+  // `(let ((x 1) (y 2)) body)` -- the bindings, and each binding in them. A
+  // bindings list is a list of lists in the first position of a special form,
+  // which `(if (ready) a b)` is not: its first list is a call.
+  const bindings = (candidate: Node): boolean => {
+    const children = candidate.namedChildren ?? [];
+    if (children.length === 0 || !children.every((child) => child.type === 'list')) return false;
+    const holder = candidate.parent;
+    if (holder?.type !== 'special_form') return false;
+    // By node id: every read of a child hands back a fresh wrapper object, so
+    // comparing them by reference is always false and the rule never fired.
+    const first = (holder.namedChildren ?? [])[0];
+    return first !== undefined && first.id === candidate.id;
+  };
+  return bindings(node) || bindings(parent);
+}
+
+/**
+ * The name in front of a Dart argument list.
+ *
+ * `repo.findById(id)` parses as an identifier and two selectors, with no node
+ * standing for the call itself; the argument list is the only marker, so the
+ * name is whatever sits immediately before it.
+ */
+function dartCallee(argumentPart: Node): Node | null {
+  const selector = argumentPart.parent ?? null;
+  const previous = selector?.previousNamedSibling ?? null;
+  if (!previous) return null;
+  // `.findById` is a selector of its own; a bare `validate(...)` is an identifier.
+  return previous;
 }
 
 interface Node {
   type: string;
+  /** Stable per node; the wrapper objects around it are not. */
+  id?: number;
+  parent?: Node | null;
+  previousNamedSibling?: Node | null;
   text?: string;
   startPosition: { row: number };
   endPosition: { row: number };

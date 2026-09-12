@@ -604,6 +604,36 @@ export class MemoryStore {
     return rows.map(rowToNode);
   }
 
+  /**
+   * Declarations whose name a query mentions, folded for case.
+   *
+   * The entity branch matches names the way a person types them; this is the
+   * same match, returning the declarations themselves so the graph can be
+   * walked from there.
+   */
+  async symbolIdsNamed(names: string[]): Promise<string[]> {
+    if (!this.graphReady || names.length === 0) return [];
+    const rows = await this.run(
+      'MATCH (s:Symbol) WHERE list_contains($names, lower(s.name)) RETURN s.id AS id',
+      { names: names.map((name) => name.toLowerCase()) },
+    );
+    return (rows as unknown as Array<{ id: string }>).map((row) => row.id);
+  }
+
+  /** Memories recorded about any of these declarations. */
+  async nodesAboutSymbolIds(ids: string[], limit: number): Promise<MemoryNode[]> {
+    if (!this.graphReady || ids.length === 0) return [];
+    const rows = await this.run(
+      `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)
+       WHERE list_contains($ids, s.id) AND m.superseded_at = 0
+       RETURN ${NODE_COLUMNS}
+       ORDER BY m.importance DESC, m.created_at DESC
+       LIMIT ${Math.max(1, Math.floor(limit))}`,
+      { ids },
+    );
+    return rows.map(rowToNode);
+  }
+
   async nodesAboutSymbol(name: string): Promise<MemoryNode[]> {
     const rows = await this.run(
       `MATCH (m:Memory)-[:ABOUT]->(s:Symbol)

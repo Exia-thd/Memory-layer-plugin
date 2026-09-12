@@ -875,6 +875,22 @@ export async function runConstraints(
 
 export interface ChangedFileMemory {
   file: string;
+  /**
+   * Decisions recorded not about this file, but about code that calls into it.
+   *
+   * The commit check's blind spot: a constraint lives with the caller -- "this
+   * returns null rather than throwing, the caller counts on it" -- and editing
+   * the callee showed nothing at all. One hop along the call graph, and each
+   * entry says which declaration it came through.
+   */
+  viaCalls?: Array<{
+    id: string;
+    layer: Layer;
+    title: string;
+    sourceRef: string;
+    /** The declaration in the changed file that this memory's code reaches. */
+    reaches: string;
+  }>;
   /** Decisions, constraints and events recorded against this file. */
   memories: Array<{
     id: string;
@@ -887,6 +903,51 @@ export interface ChangedFileMemory {
   }>;
   /** Memories that matched but were not listed, so the cut is visible. */
   omitted: number;
+}
+
+/**
+ * Decisions recorded about code that calls into this file.
+ *
+ * Only recorded memories, never the file chunks: a chunk of a caller is not a
+ * reason to stop and read, and a commit check that prints twenty of them is a
+ * commit check people turn off.
+ */
+async function reachedByCalls(
+  store: MemoryStore,
+  file: string,
+  already: string[],
+  limit: number,
+): Promise<NonNullable<ChangedFileMemory['viaCalls']>> {
+  const declared = await store.symbolsInFile(file);
+  if (declared.length === 0) return [];
+
+  const ids = declared.map((symbol) => symbol.id);
+  const owned = new Set(ids);
+  const seen = new Set(already);
+  const reaches = new Map<string, string>();
+  for (const edge of await store.neighboursOf(ids)) {
+    // Callers only: what this file calls is its own business, but what calls
+    // into it is what a change here can break.
+    if (owned.has(edge.from) || !owned.has(edge.to)) continue;
+    reaches.set(edge.from, edge.to);
+  }
+  if (reaches.size === 0) return [];
+
+  const out: NonNullable<ChangedFileMemory['viaCalls']> = [];
+  for (const node of await store.nodesAboutSymbolIds([...reaches.keys()], limit * 4)) {
+    if (node.layer === 'artifact' || seen.has(node.id)) continue;
+    seen.add(node.id);
+    const target = [...reaches.values()][0] ?? '';
+    out.push({
+      id: node.id,
+      layer: node.layer,
+      title: node.title,
+      sourceRef: node.sourceRef,
+      reaches: target.replace(/^Symbol:[^:]*:/, ''),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export interface ChangesReport {
@@ -941,8 +1002,13 @@ export async function runChanges(
 
     for (const file of files) {
       const nodes = await store.nodesAnchoredToPath(file);
-      if (nodes.length === 0) {
+      const viaCalls = await reachedByCalls(store, file, nodes.map((node) => node.id), perFile);
+      if (nodes.length === 0 && viaCalls.length === 0) {
         uncovered.push(file);
+        continue;
+      }
+      if (nodes.length === 0) {
+        covered.push({ file, memories: [], omitted: 0, viaCalls });
         continue;
       }
       // Decisions first, then the chunks of the file itself. A commit check that
@@ -965,6 +1031,7 @@ export async function runChanges(
           contested: contestedIds.has(node.id),
         })),
         omitted: nodes.length - shown.length,
+        ...(viaCalls.length > 0 ? { viaCalls } : {}),
       });
     }
 

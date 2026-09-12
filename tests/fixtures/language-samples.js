@@ -75,7 +75,7 @@ record Line(int qty) {}
 @interface Audited {}`,
     ['InvoiceService', 'InvoiceService.InvoiceService', 'InvoiceService.get', 'InvoiceService.all', 'InvoiceService.Mode', 'Store', 'Store.find', 'Line', 'Audited']],
   c_sharp: ['A.cs', `using System;
-namespace Inventory.Api
+namespace Billing.Api
 {
     public class OrderService : IOrderService
     {
@@ -91,7 +91,7 @@ namespace Inventory.Api
     public delegate void Changed();
 }`,
     ['OrderService', 'OrderService.OrderService', 'OrderService.Get', 'OrderService.ListAsync', 'OrderService.Count', 'IOrderService', 'IOrderService.Get', 'OrderDto', 'Point', 'State', 'Changed']],
-  c_sharp_file_scoped: ['B.cs', `namespace Inventory.Domain;
+  c_sharp_file_scoped: ['B.cs', `namespace Billing.Domain;
 public sealed class Product
 {
     public Money Price() => default;

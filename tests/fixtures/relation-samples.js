@@ -145,6 +145,28 @@ let get = id => {
   let found = Repo.findById(id)
   validate(found)
 }`,
+  'a.elm': `module Billing exposing (..)
+
+import Domain exposing (Invoice)
+
+total : Invoice -> Int
+total invoice =
+    add (value invoice) 1`,
+  'a.ql': `import javascript
+
+class Charge extends DataFlow::Node {
+  string describe() { result = name() }
+}`,
+  'a.tla': `---- MODULE Billing ----
+EXTENDS Naturals
+Helper(n) == n + 1
+Next == Helper(3)
+====`,
+  'a.el': `(require (quote billing-domain))
+
+(defun billing-get (id)
+  (let ((found (repo-find-by-id id)))
+    (validate found)))`,
   'a.ts': `import { Repo } from './repo.js';
 export class Service extends Base implements Store {
   get(id: string) { return this.repo.findById(id); }

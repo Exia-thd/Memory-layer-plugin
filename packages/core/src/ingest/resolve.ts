@@ -16,6 +16,8 @@ import type { Declaration } from './chunker.js';
  * a call only something callable -- and then by where they live. Every edge
  * carries how it was resolved:
  *
+ *   type      the receiver was declared with a type that declares it:
+ *             `private readonly OrderRepository _repo` then `_repo.FindById`
  *   file      the only declaration of that name in the calling file
  *   receiver  the receiver names a type that declares it: `Mapper.ToDto`
  *   import    the only match among the files this one imports, or the only one
@@ -28,12 +30,12 @@ import type { Declaration } from './chunker.js';
  * on a real C# service, 68,000 of 74,000 call sites. The two are different
  * facts and are reported as such.
  *
- * Nothing here reads types, and the limit shows: thirty-eight test classes each
- * declaring `CreateClient`, all in one namespace, cannot be told apart by
- * anything short of inferring what the receiver is. Those stay ambiguous.
+ * Nothing here reads types, and the limit shows: dozens of test classes in one namespace,
+ * each declaring the same helper method, cannot be told apart by anything
+ * short of inferring what the receiver is. Those stay ambiguous.
  */
 
-export type Confidence = 'file' | 'receiver' | 'import' | 'unique';
+export type Confidence = 'type' | 'file' | 'receiver' | 'import' | 'unique';
 
 export interface RelationReport {
   calls: number;
@@ -109,7 +111,7 @@ export async function writeRelations(
   /**
    * Namespaces this file can see: what it imports, and its own.
    *
-   * A C# `using Inventory.Domain` names a namespace spread over fifty files,
+   * A C# `using Billing.Domain` names a namespace spread over fifty files,
    * so it is not one import edge -- but it is exactly what tells `FindAsync`
    * apart from the other three declarations of that name.
    */
@@ -161,6 +163,7 @@ export async function writeRelations(
     const picked = choose(candidates.get(call.name) ?? [], {
       filePath,
       receiver: call.receiver,
+      receiverType: call.receiverType,
       construction: call.construction,
       imported: importedFiles,
       visibleContainers,
@@ -302,6 +305,8 @@ const CALLABLE_KIND = /function|method|constructor|def|macro|command|predicate|i
 interface Context {
   filePath: string;
   receiver: string | null;
+  /** The type the receiver was declared with, when the file said so. */
+  receiverType?: string | null;
   /** `new Order()`: only a type can answer. */
   construction?: boolean;
   /** Files this one imports by path. */
@@ -334,6 +339,14 @@ function choose(all: SymbolRow[], context: Context): Choice {
   const byKind = all.filter((row) => wanted.test(row.kind));
   const rows = byKind.length > 0 ? byKind : all;
 
+  // The declared type of the receiver, where the file gave one. Nothing else
+  // available here is this specific: it is the difference between one
+  // `FindById` and the thirty others in a repository.
+  if (context.receiverType) {
+    const owned = rows.filter((row) => owner(row) === context.receiverType);
+    if (owned.length === 1) return { row: owned[0]!, confidence: 'type' };
+  }
+
   const sameFile = rows.filter((row) => row.filePath === context.filePath);
   if (sameFile.length === 1) return { row: sameFile[0]!, confidence: 'file' };
 
@@ -341,9 +354,7 @@ function choose(all: SymbolRow[], context: Context): Choice {
     // `Mapper.ToDto` and `_repo.FindAsync` both name their owner; the first is
     // a type, the second a field named after one often enough to be worth
     // trying. Only an exact match on the enclosing declaration counts.
-    const owned = rows.filter(
-      (row) => qualifiedOf(row).split('.').slice(0, -1).join('.') === context.receiver,
-    );
+    const owned = rows.filter((row) => owner(row) === context.receiver);
     if (owned.length === 1) return { row: owned[0]!, confidence: 'receiver' };
   }
 
@@ -423,6 +434,11 @@ function containerCandidates(module: string): string[] {
   const out: string[] = [];
   for (let end = parts.length; end > 0 && out.length < 4; end--) out.push(parts.slice(0, end).join('.'));
   return out;
+}
+
+/** The declaration that encloses this one, by qualified name: `OrderService` of `OrderService.Get`. */
+function owner(row: SymbolRow): string {
+  return qualifiedOf(row).split('.').slice(0, -1).join('.');
 }
 
 function qualifiedOf(row: SymbolRow): string {

@@ -322,10 +322,11 @@ const RULES: Record<string, LanguageRule> = {
       'class_definition', 'mixin_declaration', 'enum_declaration', 'extension_declaration',
       'function_signature', 'constructor_signature',
     ],
-    // No calls: Dart's grammar has no call node, only a chain of selectors, so
-    // the name being called is not reachable the way it is everywhere else.
-    // Imports and base types are.
     relations: {
+      // Dart has no call node. `repo.findById(id)` is an identifier followed by
+      // two selectors, so the argument list is what marks a call and the name
+      // is read backwards from it -- see `dartCall`.
+      calls: ['argument_part'],
       imports: ['import_or_export'],
       heritage: ['superclass', 'interfaces'],
     },
@@ -518,6 +519,18 @@ const RULES: Record<string, LanguageRule> = {
     mode: 'AST_DECLARATION',
     boundaries: ['function_definition', 'macro_definition'],
     symbols: ['function_definition', 'macro_definition'],
+    relations: {
+      // Everything in Lisp is a list whose head is the thing being called.
+      calls: ['list'],
+      importCalls: ['require', 'load'],
+      // Special forms are syntax, not calls into this code.
+      ignoreCallees: [
+        'defun', 'defmacro', 'defvar', 'defconst', 'defcustom', 'let', 'let*',
+        'if', 'when', 'unless', 'cond', 'while', 'progn', 'prog1', 'setq', 'setf',
+        'lambda', 'quote', 'function', 'and', 'or', 'not', 'condition-case',
+        'save-excursion', 'with-current-buffer', 'dolist', 'dotimes',
+      ],
+    },
   },
   systemrdl: {
     label: 'systemrdl',
@@ -526,6 +539,14 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['component_def'],
     symbols: ['component_named_def'],
     containers: ['description'],
+    relations: {
+      // A register description has no calls; instantiating a component is the
+      // relation it does have -- `ctrl_r ctrl @ 0x0;` uses the `ctrl_r` type --
+      // so it is read as a construction, which resolves to the type's definition.
+      calls: ['explicit_component_inst'],
+      constructs: ['explicit_component_inst'],
+      calleeFields: ['id'],
+    },
   },
   tlaplus: {
     label: 'tlaplus',
@@ -534,6 +555,12 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['operator_definition'],
     symbols: ['module', 'operator_definition'],
     containers: ['module'],
+    relations: {
+      // Applying an operator is TLA+'s call: `Next == Helper(x)`.
+      calls: ['bound_op'],
+      calleeFields: ['name'],
+      imports: ['extends'],
+    },
   },
   // Vue's grammar sees <template>, <script> and <style>; the script body is
   // opaque text to it. The chunker re-parses that text with the JavaScript or
@@ -604,6 +631,12 @@ const RULES: Record<string, LanguageRule> = {
       'value_declaration', 'port_annotation',
     ],
     variables: ['value_declaration'],
+    relations: {
+      calls: ['function_call_expr'],
+      calleeFields: ['target'],
+      imports: ['import_clause'],
+      importSource: 'moduleName',
+    },
   },
   ql: {
     label: 'ql',
@@ -613,6 +646,13 @@ const RULES: Record<string, LanguageRule> = {
     boundaries: ['module', 'dataclass', 'classlessPredicate', 'select'],
     symbols: ['module', 'dataclass', 'classlessPredicate', 'memberPredicate'],
     containers: ['moduleMember'],
+    relations: {
+      calls: ['call_or_unqual_agg_expr', 'qualifiedRhs'],
+      imports: ['importDirective'],
+      // The base type is a field of the class, not a clause of its own; asking
+      // for the node would take the class's own name with it.
+      heritageFields: ['extends'],
+    },
   },
   yaml: {
     label: 'yaml',
