@@ -36,7 +36,15 @@ test('redaction covers the common credential shapes', () => {
     const { text } = redact(value);
     assert.ok(text.includes('[REDACTED'), `not redacted: ${value}`);
   }
-  assert.ok(looksRedacted('nothing sensitive here'));
+  // Both directions, because the sense of this one is easy to invert and the
+  // inverted reading rejects clean text while storing every secret.
+  assert.ok(looksRedacted('nothing sensitive here'), 'clean text read as holding a secret');
+  assert.ok(
+    !looksRedacted('ghp_abcdefghijklmnopqrstuvwxyz0123456789'),
+    'a live token read as clean',
+  );
+  // And after redaction the same text passes, which is what the check is for.
+  assert.ok(looksRedacted(redact('ghp_abcdefghijklmnopqrstuvwxyz0123456789').text));
 });
 
 test('a redacted secret keeps the surrounding text usable', () => {

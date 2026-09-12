@@ -6,10 +6,11 @@ them when an agent needs the reasoning behind unfamiliar code.
 
 > Tiếng Việt: [README_vn.md](README_vn.md)
 
-It records what each file declares, so a question about a symbol has something
-to anchor on — but deliberately no call graph and no imports. *What calls what*
-is a different question with a different lifecycle; this one answers *why it is
-like that*.
+It records what each file declares and what those declarations do to each other
+— calls, inheritance, imports, across 29 languages — so a question about a
+symbol has somewhere to anchor and somewhere to go next. The graph is not the
+point; reaching the reasoning is. *What calls what* is how a decision recorded
+on one function is found from the code that depends on it.
 
 ---
 
@@ -40,23 +41,52 @@ Asking from either end reaches the other.
 
 Requires Node 20.11+ and a git repository.
 
-```bash
-pnpm install
-pnpm build
+### As a Claude Code plugin
 
-node packages/cli/dist/cli.js init      # store, scan, code graph, viewer
-node packages/cli/dist/cli.js search "why do we retry declined cards"
+```
+/plugin marketplace add Exia-thd/DAI-memory-layer-plugin
+/plugin install dai-memory
+```
+
+Then, once, from the installed plugin directory:
+
+```bash
+node bin/setup.mjs
+```
+
+Installing a plugin copies the repository — it does not install dependencies or
+compile TypeScript, and this one is a TypeScript workspace. `setup.mjs` does
+both and checks that the file every entry point runs actually came out. Until
+it has run, session start says so rather than staying quiet: a plugin that
+looks installed and silently does nothing is the worse failure.
+
+Restart Claude Code afterwards so the MCP server starts. `.mcp.json` registers
+it and `hooks/` wires it into the session; nothing else needs configuring.
+
+### From a clone
+
+```bash
+node bin/setup.mjs                      # or: pnpm install && pnpm build
+
+node bin/dai-memory.mjs init            # store, scan, code graph, viewer
+node bin/dai-memory.mjs search "why do we retry declined cards"
 ```
 
 `init` is the whole setup: it scans the conventional places a project keeps
-documentation and source, builds the code graph, and writes
-`.memory/ui.html` — open that in a browser to see what it found.
+documentation and source, builds the code graph, and writes `.memory/ui.html` —
+open that in a browser to see what it found.
+
+The embedding model is part of the install, not something `init` acquires if it
+happens to be convenient. `setup.mjs` downloads it (about 130 MB, cached
+locally) and **fails if it cannot** — and by default `init` refuses to create a
+store without it. A store built from the lexical fallback answers every question
+with something, just worse, in a way indistinguishable from working until a
+project's whole history is sitting in a vector space that cannot be compared
+with the real one. `MEMORY_LAYER_EMBEDDINGS=hash` is the deliberate opt-in for a
+machine that will never reach a model hub.
 
 Installing into a codebase that already exists is the case this is for, so
 nothing about it assumes an empty repository.
-
-As a Claude plugin, `.mcp.json` registers the MCP server and `hooks/` wires it
-into the session; nothing needs to be configured by hand.
 
 A task-by-task guide, including what to automate and what not to, is in
 [docs/usage.md](docs/usage.md).
@@ -79,7 +109,7 @@ A task-by-task guide is in [docs/usage.md](docs/usage.md).
 | `dai-memory graph <id> --depth N` | Walk the memory graph |
 | `dai-memory constraints` | What this project has already settled |
 | `dai-memory conflicts` | Contradictions a person needs to resolve |
-| `dai-memory map [path] [--format mermaid]` | The code graph: files, declarations, and the memory about each |
+| `dai-memory map [path] [--format mermaid]` | The code graph: files, declarations, what calls what, and the memory about each |
 | `dai-memory clusters` | Communities in the memory graph, with any stored summary |
 | `dai-memory summarize <id> --body S` | Record a summary for a group, linked to its members |
 | `dai-memory session start\|end` | Open or close a session, so writes record when they happened |
@@ -288,7 +318,8 @@ semantic ones do not. Decay demotes; it does not remove.
 
 | Variable | Effect |
 |---|---|
-| `MEMORY_LAYER_EMBEDDINGS` | `auto` (default), `local` (require the real model), `hash` (offline fallback) |
+| `MEMORY_LAYER_EMBEDDINGS` | `local` (default: require the real model, fail without it), `auto` (take whichever is available), `hash` (lexical fallback only) |
+| `MEMORY_LAYER_EMBED_DEVICE` | Accelerator for the model, e.g. `dml`, `cuda`. Default `cpu`: a failed accelerator probe crashed the process at exit |
 | `MEMORY_LAYER_DIMS` | Vector width at `init`. Fixed thereafter. |
 | `MEMORY_LAYER_HOME` | Registry, logs and model cache (default `~/.memory`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Model weights, if they need to live elsewhere |

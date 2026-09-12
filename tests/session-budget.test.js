@@ -107,3 +107,20 @@ test('a small result is returned whole, with no notice', () => {
   assert.equal(text, JSON.stringify({ id: 'mem_1', title: 'Short' }, null, 2));
   assert.ok(!text.includes('dai_memory_truncated'));
 });
+
+test('an oversized result with nothing to trim says that, not "0 items dropped"', () => {
+  // One long string, no list. The trimmer has nothing to shorten, and the old
+  // notice reported a truncation that never happened -- leaving the reader to
+  // wonder which items went missing from a reply that had in fact lost nothing.
+  const text = budgeted('dai_memory_get', {
+    id: 'mem_1',
+    body: 'x'.repeat(OUTPUT_BUDGET_BYTES + 1000),
+  });
+
+  assert.ok(text.includes('dai_memory_oversized'), text.slice(-400));
+  assert.ok(!text.includes('dai_memory_truncated'), 'claimed a trim that did not happen');
+  assert.ok(!/\b0 item\(s\) were dropped/.test(text), text.slice(-400));
+  // Returned whole: nothing was silently removed, so the body must still parse.
+  const body = text.split('\n\ndai_memory_oversized')[0];
+  assert.equal(JSON.parse(body).body.length, OUTPUT_BUDGET_BYTES + 1000);
+});

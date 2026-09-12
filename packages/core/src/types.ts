@@ -74,8 +74,10 @@ export interface MemoryNode {
 /**
  * A declaration found while chunking, and nothing more.
  *
- * No callers, no imports: the join this exists for is "which decision covers
- * this function", which needs a name and a line range and stops there.
+ * Callers and imports exist, but not here: they are edges between declarations,
+ * written in a second pass once every file has been read, because a call can
+ * only be resolved against declarations that are already known. What this row
+ * carries is what the chunker can know from one file -- a name and a line range.
  */
 export interface SymbolRow {
   /** `Symbol:<file>:<name>` -- derived, so re-ingest is idempotent. */

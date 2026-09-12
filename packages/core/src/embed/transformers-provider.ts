@@ -36,7 +36,10 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       provider: 'local',
     };
     this.batchSize = options.batchSize ?? DEFAULT_EMBEDDING_CONFIG.batchSize;
-    this.device = options.device ?? DEFAULT_EMBEDDING_CONFIG.device;
+    // Named by the caller, then by the environment, then the safe default.
+    this.device = options.device
+      ?? process.env.MEMORY_LAYER_EMBED_DEVICE?.trim().toLowerCase()
+      ?? DEFAULT_EMBEDDING_CONFIG.device;
   }
 
   async warmup(): Promise<void> {
@@ -69,12 +72,16 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       // wherever it is short enough.
     }
 
-    // Accelerator first, CPU second.
+    // The requested device first, CPU second.
     //
-    // `auto` picks whatever the runtime advertises, and on this machine that was
-    // DirectML, which then refused with "DML EP can only be used with CPU EPs".
-    // A device that does not work is a reason to use another device, not a reason
-    // to lose semantic search -- but the downgrade is recorded, never silent.
+    // The default is now CPU, so this list is usually one entry long. It still
+    // matters for anyone who set MEMORY_LAYER_EMBED_DEVICE: a device that does
+    // not work is a reason to use another device, not a reason to lose semantic
+    // search -- but the downgrade is recorded, never silent, and it is worth
+    // knowing that a failed accelerator attempt costs more than the attempt.
+    // See the note on DEFAULT_EMBEDDING_CONFIG.device: on this platform the
+    // failed DirectML session crashed the process at exit, long after the work
+    // had succeeded.
     const devices = this.device === 'cpu' ? ['cpu'] : [this.device, 'cpu'];
     let lastError: unknown = null;
 

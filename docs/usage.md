@@ -660,7 +660,8 @@ feature.
 |---|---|
 | `MEMORY_LAYER_HOME` | Registry and model cache (default `~/.memory-layer`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Model weights, if you need them elsewhere |
-| `MEMORY_LAYER_EMBEDDINGS=hash` | Skip the model; lexical fallback only |
+| `MEMORY_LAYER_EMBED_DEVICE` | Accelerator for the model (default `cpu`) |
+| `MEMORY_LAYER_EMBEDDINGS=hash` | Skip the model; lexical fallback only. The default is `local`, which fails rather than degrade |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Record failed commands automatically |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Byte cap on MCP tool output (default 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Token budget before Read/Grep/Glob (default 400) |

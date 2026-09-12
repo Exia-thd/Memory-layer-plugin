@@ -760,14 +760,24 @@ export class MemoryStore {
    * hangs four kinds off a declaration: the memory about it, the file that
    * declares it, what it calls and what calls it. Deleting only the first
    * stopped every rename dead, mid-ingest.
+   *
+   * Inbound calls are not simply dropped. Move a function to another file and
+   * only that file is re-read: the old declaration is deleted here, and the
+   * edge from a caller nobody re-read went with it -- so the graph answered
+   * "this function calls nothing" for code that plainly calls something. The
+   * call site is handed back to the resolver as pending instead, which either
+   * finds the declaration in its new home or reports it unresolved. Both are
+   * answers; a vanished edge is not.
    */
   async deleteSymbols(ids: string[]): Promise<number> {
+    const removing = new Set(ids);
     let removed = 0;
     for (const id of ids) {
       await this.run('MATCH (:Memory)-[r:ABOUT]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
       if (this.graphReady) {
         await this.run('MATCH (:File)-[r:DECLARES]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
         await this.run('MATCH (s:Symbol)-[r:CALLS]->() WHERE s.id = $id DELETE r', { id });
+        await this.reopenInboundCalls(id, removing);
         await this.run('MATCH ()-[r:CALLS]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
         await this.run('MATCH (s:Symbol)-[r:INHERITS]->() WHERE s.id = $id DELETE r', { id });
         await this.run('MATCH ()-[r:INHERITS]->(s:Symbol) WHERE s.id = $id DELETE r', { id });
@@ -776,6 +786,41 @@ export class MemoryStore {
       removed += 1;
     }
     return removed;
+  }
+
+  /**
+   * Turns the calls into a disappearing declaration back into open questions.
+   *
+   * Callers that are themselves being deleted are skipped: a call from code
+   * that no longer exists is not an unresolved call, it is nothing.
+   */
+  private async reopenInboundCalls(id: string, removing: Set<string>): Promise<void> {
+    const rows = await this.run(
+      `MATCH (a:Symbol)-[r:CALLS]->(s:Symbol) WHERE s.id = $id
+       RETURN a.id AS fromSymbol, a.file_path AS filePath, r.name AS name, r.line AS line`,
+      { id },
+    ) as unknown as Array<{ fromSymbol: string; filePath: string; name: string; line: number }>;
+
+    for (const row of rows) {
+      if (removing.has(row.fromSymbol)) continue;
+      const pendingId = `pending:reopened:${row.fromSymbol}:${row.name}:${row.line}`;
+      // Deleted first: the id is derived, so re-ingesting the same deletion
+      // twice would otherwise collide on the primary key and abort the run --
+      // which is how a single unlucky file once took a whole ingest down.
+      await this.run('MATCH (p:PendingCall) WHERE p.id = $id DELETE p', { id: pendingId });
+      await this.addPendingCall({
+        id: pendingId,
+        filePath: row.filePath,
+        fromSymbol: row.fromSymbol,
+        name: row.name,
+        receiver: null,
+        line: Number(row.line ?? 0),
+        kind: 'call',
+        // Honest as of this moment: nothing in the repository declares it. The
+        // second pass upgrades it to a real edge if a declaration turns up.
+        reason: 'external',
+      });
+    }
   }
 
   /** Drops a file from the graph: its imports, its declares edge, then the row. */

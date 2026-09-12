@@ -586,6 +586,17 @@ export async function ingest(
     for (const declaration of declared) declaredThisRun.push(declaration.name);
   }
 
+  // Reclamation comes first, and that ordering is load-bearing.
+  //
+  // A file that vanished has its declarations deleted here, and the calls into
+  // them are handed back as pending -- which is worth nothing if the pass that
+  // resolves pending calls has already run. That was the bug: move a function
+  // to a new file and the old file's disappearance is noticed after the only
+  // chance to reconnect its callers, so the edge was gone until some later
+  // ingest happened to re-read the calling file. Deleting before resolving also
+  // means resolution can never land on a declaration that no longer exists.
+  await reclaimVanished(store, targets, projectRoot, fileHashes, report);
+
   // A file read before the one it calls into had nothing to resolve against.
   // Now that every file in this run has been read, those names get a second
   // look -- otherwise a first ingest would leave edges missing purely because
@@ -597,8 +608,6 @@ export async function ingest(
         return null;
       }));
   }
-
-  await reclaimVanished(store, targets, projectRoot, fileHashes, report);
 
   report.redactions = [...redactionTotals.entries()].map(([rule, count]) => ({ rule, count }));
   return report;

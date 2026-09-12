@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dai-memory-layer",
+  "description": "Project memory for Claude Code: why decisions were made, what broke, and the code graph they attach to.",
+  "owner": {
+    "name": "Exia-thd"
+  },
+  "plugins": [
+    {
+      "name": "dai-memory",
+      "description": "Records why decisions were made, what broke, and which constraints apply, then retrieves them when the agent meets unfamiliar code. Builds a call/inherit/import graph across 29 languages so a memory can be reached from the code it is about.",
+      "category": "productivity",
+      "source": "./"
+    }
+  ]
+}

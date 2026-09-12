@@ -109,3 +109,75 @@ test('an empty store says so rather than printing an empty diagram', async () =>
     repo.cleanup();
   }
 });
+
+/**
+ * The tool is called the code graph; for a long time it returned only one half
+ * of it.
+ *
+ * Declarations answer "what is here". The question a person opens a map for is
+ * "what reaches this" -- and the edges that answer it were in the store, drawn
+ * in the viewer, and absent from the tool an agent actually calls. Silence read
+ * as "this function is called by nothing", which is a different claim entirely.
+ */
+const LINKED = {
+  'src/billing.js': [
+    'export function chargeInvoice(invoice) {',
+    '  return settle(invoice.amount);',
+    '}',
+    '',
+    'export function settle(amount) {',
+    '  return amount;',
+    '}',
+  ].join('\n'),
+};
+
+test('the map carries the edges, not only the declarations', async () => {
+  const repo = makeRepo(LINKED);
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src']);
+    const map = JSON.parse(cli(repo, ['map', '--json']));
+
+    const file = map.files.find((entry) => entry.file === 'src/billing.js');
+    assert.ok(file, JSON.stringify(map.files.map((f) => f.file)));
+
+    const caller = file.symbols.find((symbol) => symbol.name === 'chargeInvoice');
+    const callee = file.symbols.find((symbol) => symbol.name === 'settle');
+    assert.ok(caller && callee, JSON.stringify(file.symbols.map((s) => s.name)));
+
+    assert.ok(map.relations.calls > 0, `no calls counted: ${JSON.stringify(map.relations)}`);
+    // Both directions: the impact question is answered from the callee's side.
+    assert.ok(
+      caller.calls.includes(callee.id),
+      `chargeInvoice does not list settle: ${JSON.stringify(caller.calls)}`,
+    );
+    assert.ok(
+      callee.calledBy.includes(caller.id),
+      `settle does not list chargeInvoice: ${JSON.stringify(callee.calledBy)}`,
+    );
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('the diagram draws the calls it has both ends for', async () => {
+  const repo = makeRepo(LINKED);
+  try {
+    cli(repo, ['init', '--no-scan']);
+    cli(repo, ['ingest', 'src']);
+    const diagram = cli(repo, ['map', '--format', 'mermaid']);
+
+    assert.match(diagram, /\|calls\|/, diagram);
+    // Every arrow ends at a node the diagram declares. A Mermaid edge to an
+    // undeclared id renders as an empty box that says nothing.
+    // A node is declared wherever its shape appears -- including on the right
+    // of an arrow, which is how every symbol node in this diagram is introduced.
+    const declared = new Set([...diagram.matchAll(/(\w+)[[(]/g)].map((m) => m[1]));
+    for (const [, from, to] of diagram.matchAll(/^\s{2}(\w+) ==>\|calls\| (\w+)$/gm)) {
+      assert.ok(declared.has(from), `call edge starts at an undeclared node: ${from}`);
+      assert.ok(declared.has(to), `call edge ends at an undeclared node: ${to}`);
+    }
+  } finally {
+    repo.cleanup();
+  }
+});

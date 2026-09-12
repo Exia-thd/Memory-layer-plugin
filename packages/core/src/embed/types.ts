@@ -33,7 +33,27 @@ export const DEFAULT_EMBEDDING_CONFIG = {
   batchSize: 16,
   subBatchSize: 8,
   threads: 2,
-  device: 'auto' as const,
+  /**
+   * CPU, and asking for anything else is opt-in.
+   *
+   * `auto` let onnxruntime advertise what it had, which on this platform is
+   * DirectML. DirectML then refused the session -- "DML EP can only be used
+   * with CPU EPs" -- and the loader fell back to CPU, embedded correctly, and
+   * the whole command worked. What the failed attempt also did was leave the
+   * native runtime in a state that crashes when the process tears down:
+   * 0xC0000409, after the store was written and the output printed, which a
+   * POSIX shell truncates to exit code 127.
+   *
+   * A successful command exiting non-zero is not cosmetic. The hooks read a
+   * non-zero exit as "memory did not answer" and, by design, say nothing --
+   * so on every machine where the real model worked, every hook silently did
+   * nothing. Measured here: `device: 'cpu'` exits 0, `device: 'auto'` exits
+   * 0xC0000409, and both run the same CPU session and return the same vectors.
+   *
+   * So the accelerator is something a person asks for by name, with
+   * MEMORY_LAYER_EMBED_DEVICE, on a machine where they have seen it work.
+   */
+  device: 'cpu' as const,
 };
 
 /**

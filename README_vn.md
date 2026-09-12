@@ -4,9 +4,11 @@ Ký ức dự án cho Claude: nó ghi lại **vì sao** — quyết định, s�
 quyết định đó, ràng buộc, và quan hệ giữa chúng — rồi lấy ra khi agent cần lý do
 đằng sau đoạn code mà nó không viết.
 
-Nó ghi nhận **mỗi file khai báo những gì**, để một câu hỏi về symbol có chỗ neo —
-nhưng cố ý **không** có call graph, không có imports. *Cái gì gọi cái gì* là câu
-hỏi khác, vòng đời khác; cái này trả lời *vì sao nó lại như vậy*.
+Nó ghi nhận **mỗi file khai báo những gì**, và các khai báo đó tác động lên nhau
+ra sao — gọi hàm, kế thừa, import, trên 29 ngôn ngữ — để một câu hỏi về symbol
+vừa có chỗ neo vừa có đường đi tiếp. Đồ thị không phải là mục đích; tới được lý
+do mới là. *Cái gì gọi cái gì* chính là cách một quyết định ghi trên một hàm được
+tìm thấy từ đoạn code phụ thuộc vào nó.
 
 > Bản tiếng Anh: [README.md](README.md) · Hướng dẫn dùng:
 > [docs/usage_vn.md](docs/usage_vn.md)
@@ -40,23 +42,52 @@ cũng ra đầu kia.
 
 Cần Node 20.11+ và một git repository.
 
-```bash
-pnpm install
-pnpm build
+### Dưới dạng plugin của Claude Code
 
-node packages/cli/dist/cli.js init      # kho, quét, code graph, trang xem
-node packages/cli/dist/cli.js search "vì sao thử lại thẻ bị từ chối"
+```
+/plugin marketplace add Exia-thd/DAI-memory-layer-plugin
+/plugin install dai-memory
+```
+
+Rồi chạy một lần, trong thư mục plugin vừa cài:
+
+```bash
+node bin/setup.mjs
+```
+
+Cài plugin chỉ là **chép repo về** — nó không cài dependency, cũng không biên
+dịch TypeScript, mà đây là một workspace TypeScript. `setup.mjs` làm cả hai việc
+đó rồi kiểm tra xem file mà mọi lối vào đều chạy có thật sự sinh ra chưa. Chừng
+nào chưa chạy, lúc mở phiên nó sẽ nói ra, thay vì im lặng: một plugin trông như
+đã cài mà không làm gì cả mới là hỏng nặng hơn.
+
+Cài xong khởi động lại Claude Code để MCP server chạy. `.mcp.json` đăng ký
+server và `hooks/` nối nó vào phiên; không cần cấu hình tay gì thêm.
+
+### Từ bản clone
+
+```bash
+node bin/setup.mjs                      # hoặc: pnpm install && pnpm build
+
+node bin/dai-memory.mjs init            # kho, quét, code graph, trang xem
+node bin/dai-memory.mjs search "vì sao thử lại thẻ bị từ chối"
 ```
 
 `init` là toàn bộ phần cài đặt: nó quét những chỗ quy ước mà dự án hay để tài
 liệu và mã nguồn, dựng code graph, rồi ghi `.memory/ui.html` — mở file đó bằng
 trình duyệt là thấy nó tìm được gì.
 
+Model embedding là **một phần của việc cài**, không phải thứ `init` nhặt được
+thì dùng. `setup.mjs` tải nó về (khoảng 130 MB, cache ở máy) và **hỏng nếu không
+tải được** — và mặc định `init` từ chối tạo kho khi thiếu nó. Một cái kho dựng
+bằng bản dự phòng từ vựng vẫn trả lời mọi câu hỏi, chỉ là tệ hơn, theo cái kiểu
+không phân biệt được với đang chạy tốt, cho tới lúc cả lịch sử dự án đã nằm
+trong một không gian vector không so sánh được với không gian thật.
+`MEMORY_LAYER_EMBEDDINGS=hash` là lựa chọn cố ý cho máy sẽ không bao giờ với tới
+được model hub.
+
 Cài vào một codebase **đã tồn tại** chính là trường hợp hệ này sinh ra để phục
 vụ, nên không có chỗ nào giả định repo trống.
-
-Dưới dạng plugin của Claude, `.mcp.json` đăng ký MCP server và `hooks/` nối nó
-vào phiên làm việc; không cần cấu hình tay gì cả.
 
 Hướng dẫn theo từng việc, kể cả nên tự động hoá cái gì và không nên cái gì, nằm
 ở [docs/usage_vn.md](docs/usage_vn.md).
@@ -77,7 +108,7 @@ Hướng dẫn theo từng việc, kể cả nên tự động hoá cái gì và
 | `dai-memory graph <id> --depth N` | Duyệt đồ thị ký ức |
 | `dai-memory constraints` | Những gì dự án đã chốt |
 | `dai-memory conflicts` | Mâu thuẫn cần người quyết |
-| `dai-memory map [path] [--format mermaid]` | Code graph: file, khai báo, và ký ức về từng cái |
+| `dai-memory map [path] [--format mermaid]` | Code graph: file, khai báo, cái gì gọi cái gì, và ký ức về từng cái |
 | `dai-memory clusters` | Cụm trong đồ thị ký ức, kèm tóm tắt nếu có |
 | `dai-memory summarize <id> --body S` | Ghi tóm tắt cho một cụm, nối vào các thành viên |
 | `dai-memory session start\|end` | Mở/đóng phiên, để lệnh ghi biết nó xảy ra lúc nào |
@@ -283,7 +314,8 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
 
 | Biến | Tác dụng |
 |---|---|
-| `MEMORY_LAYER_EMBEDDINGS` | `auto` (mặc định), `local` (bắt buộc model thật), `hash` (dự phòng offline) |
+| `MEMORY_LAYER_EMBEDDINGS` | `local` (mặc định: bắt buộc model thật, không có thì hỏng), `auto` (có gì dùng nấy), `hash` (chỉ dự phòng từ vựng) |
+| `MEMORY_LAYER_EMBED_DEVICE` | Thiết bị chạy model, ví dụ `dml`, `cuda`. Mặc định `cpu`: thử accelerator hỏng làm process crash lúc thoát |
 | `MEMORY_LAYER_DIMS` | Độ rộng vector lúc `init`. Cố định sau đó. |
 | `MEMORY_LAYER_HOME` | Registry, log và cache model (mặc định `~/.memory`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Trọng số model, nếu cần để chỗ khác |

@@ -53,12 +53,38 @@ export async function init(
 
   // Capabilities are probed before anything is written, and recorded, so a broken
   // backend is reported at init rather than discovered on a query that returns nothing.
+  // Noted before probing, because probing creates the directory: an `init` that
+  // refuses must not leave a `.memory` behind for somebody to read as a store.
+  const storeExisted = fs.existsSync(dir);
   const capabilities = await probeCapabilities(dir);
-  const choice = await selectProvider(dimensions).catch(() => null);
-  if (choice) {
-    capabilities.embeddings = choice.capability;
-    cachedProvider = choice;
-  }
+
+  // No store is created without an embedder, and by default that means the real
+  // model. `init` used to swallow this failure and carry on: the store was
+  // created, the embedding line said `null`, and everything downstream worked
+  // except the part that gives this project its name. Failing here costs one
+  // command; finding out later costs the store.
+  const choice = await selectProvider(dimensions).catch((err: unknown) => {
+    if (!storeExisted) {
+      // Only what this call made, and only while it is still empty. A directory
+      // with anything in it belongs to somebody else's run.
+      try {
+        if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+      } catch {
+        // Tidiness is not worth replacing the real error with a filesystem one.
+      }
+    }
+    throw new Error(
+      `${err instanceof Error ? err.message : String(err)}\n\n` +
+      'No store was created. The embedding model is part of the install, not an ' +
+      'optional extra: a store built without it holds a project\'s history in a ' +
+      'vector space that cannot be compared with the real one.\n' +
+      'Run `node bin/setup.mjs` once with network access, or -- knowing what it ' +
+      'costs -- set MEMORY_LAYER_EMBEDDINGS=hash for the lexical fallback, or ' +
+      'MEMORY_LAYER_EMBEDDINGS=auto to take whichever is available.',
+    );
+  });
+  capabilities.embeddings = choice.capability;
+  cachedProvider = choice;
 
   // The store stays open from here to the end of init. A LadybugDB path opened
   // once in a process cannot be opened a second time in it, so doctor has to run

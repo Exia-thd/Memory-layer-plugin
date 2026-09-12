@@ -1,7 +1,7 @@
 {
   "dai-memory": {
     "command": "node",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/packages/cli/dist/cli.js", "serve"],
+    "args": ["${CLAUDE_PLUGIN_ROOT}/bin/dai-memory.mjs", "serve"],
     "env": {
       "MEMORY_LAYER_LOG_LEVEL": "warn"
     }

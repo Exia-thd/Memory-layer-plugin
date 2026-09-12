@@ -16,10 +16,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.join(HERE, '..', 'packages', 'cli', 'dist', 'cli.js');
+const { CLI_PATH: CLI, isBuilt, setupMessage } = await import(
+  pathToFileURL(path.join(HERE, '..', 'bin', 'resolve-cli.mjs')).href
+);
 const BUDGET_MS = 7000;
 
 /**
@@ -81,6 +83,25 @@ try {
   const input = await readStdin();
   const payload = input ? safeParse(input) : {};
   const cwd = payload.cwd || process.cwd();
+
+  // Said before the store check, not after it.
+  //
+  // An unbuilt plugin cannot run `init`, so there is never a store, so a notice
+  // placed after that check would never be reached -- which is precisely how
+  // this failure stayed invisible: the one condition that needs reporting is
+  // the one that skips the report. Only session start says it; a notice on
+  // every Read and Grep would be noise about the same thing.
+  if (!isBuilt()) {
+    if (mode === 'session-start') {
+      emit({
+        hookSpecificOutput: {
+          hookEventName: 'SessionStart',
+          additionalContext: setupMessage(),
+        },
+      });
+    }
+    exitQuiet();
+  }
 
   if (!hasStore(cwd)) exitQuiet();
 

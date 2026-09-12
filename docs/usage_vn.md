@@ -664,7 +664,8 @@ một khách hàng xuất hiện trong repo khác là một sự cố, không ph
 |---|---|
 | `MEMORY_LAYER_HOME` | Registry và cache model (mặc định `~/.memory-layer`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Trọng số model, nếu bạn cần để chỗ khác |
-| `MEMORY_LAYER_EMBEDDINGS=hash` | Bỏ qua model; chỉ dùng bản dự phòng từ vựng |
+| `MEMORY_LAYER_EMBED_DEVICE` | Thiết bị chạy model (mặc định `cpu`) |
+| `MEMORY_LAYER_EMBEDDINGS=hash` | Bỏ qua model; chỉ dự phòng từ vựng. Mặc định là `local`, thà hỏng chứ không tự hạ cấp |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Tự ghi lệnh thất bại |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Trần byte cho output tool MCP (mặc định 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Ngân sách token trước Read/Grep/Glob (mặc định 400) |

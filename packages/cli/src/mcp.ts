@@ -136,9 +136,12 @@ const TOOLS = [
   {
     name: 'dai_memory_map',
     description:
-      'The code graph: which files declare what, and which memory is about each ' +
-      'declaration. Use to get oriented in an unfamiliar area before reading files ' +
-      'one by one. Pass a path prefix to narrow it.',
+      'The code graph: which files declare what, what each declaration calls and is ' +
+      'called by, what it inherits, which files import which, and which memory is about ' +
+      'each declaration. Use to get oriented in an unfamiliar area before reading files ' +
+      'one by one, and to see what reaches a declaration before changing it. Pass a path ' +
+      'prefix to narrow it -- edges leaving the prefix are counted so a narrowed view is ' +
+      'not mistaken for an isolated one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -241,12 +244,21 @@ export function budgeted(tool: string, payload: unknown): string {
 
   const trimmed = trimArrays(payload, OUTPUT_BUDGET_BYTES);
   const text = JSON.stringify(trimmed.value, null, 2);
-  const notice =
-    `
+
+  // Nothing dropped, and still over: the size is in one long value, not in a
+  // list. Saying "0 items were dropped" there described a trim that did not
+  // happen and left the reader to work out why the reply was still oversized.
+  const notice = trimmed.dropped === 0
+    ? `
+
+dai_memory_oversized: ${tool} produced ${full.length} bytes, over the ` +
+      `${OUTPUT_BUDGET_BYTES}-byte budget, and none of it is in a list that could be ` +
+      'shortened -- it is returned whole. Narrow the query, or raise MEMORY_LAYER_OUTPUT_BUDGET.'
+    : `
 
 dai_memory_truncated: ${tool} produced ${full.length} bytes, over the ` +
-    `${OUTPUT_BUDGET_BYTES}-byte budget. ${trimmed.dropped} item(s) were dropped from ` +
-    'the end of the longest list. Narrow the query, or raise MEMORY_LAYER_OUTPUT_BUDGET.';
+      `${OUTPUT_BUDGET_BYTES}-byte budget. ${trimmed.dropped} item(s) were dropped from ` +
+      'the end of the longest list. Narrow the query, or raise MEMORY_LAYER_OUTPUT_BUDGET.';
   return text + notice;
 }
 

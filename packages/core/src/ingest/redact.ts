@@ -58,7 +58,18 @@ export function redact(text: string): RedactionResult {
   return { text: output, redactions };
 }
 
-/** True when the text still looks like it holds a secret. Used by tests and doctor. */
+/**
+ * True when no rule matches any more -- the text looks clean.
+ *
+ * The comment here used to say the opposite ("true when the text still holds a
+ * secret"), which is the one kind of wrong that matters on a function like this:
+ * a caller who believed it would write `if (looksRedacted(t)) reject(t)` and
+ * reject every clean string while storing every secret. The name is the true
+ * one; the sentence was not. Both directions are pinned by a test.
+ *
+ * A pass here means no *known* rule matched. It is not a guarantee that the
+ * text holds no secret -- no list of patterns is.
+ */
 export function looksRedacted(text: string): boolean {
   return RULES.every((rule) => {
     rule.pattern.lastIndex = 0;
