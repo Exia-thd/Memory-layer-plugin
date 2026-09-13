@@ -1,7 +1,6 @@
 import { createRequire } from 'node:module';
-import nodePath from 'node:path';
-import { globalDir } from '../util/paths.js';
 import { normalize } from './hash-provider.js';
+import { MODEL_DTYPE, missingModelFiles, modelCacheDir } from './model-cache.js';
 import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingIdentity, type EmbeddingProvider } from './types.js';
 import { log } from '../util/log.js';
 
@@ -12,19 +11,25 @@ export interface TransformersOptions {
   dimensions?: number;
   batchSize?: number;
   device?: string;
+  /**
+   * Whether this load may fetch the model. Only setup and `init` pass true;
+   * everything else requires it on disk already. See `selectProvider`.
+   */
+  allowDownload?: boolean;
 }
 
 /**
  * transformers.js running ONNX locally: no API call, no data leaving the machine.
  *
- * The first run downloads the model. Where that download is impossible -- an
- * offline machine, a blocked network -- `warmup` fails with the reason, and the
- * caller falls back rather than the whole ingest dying.
+ * The model is downloaded by setup (or by `init` on a new machine) and read from
+ * disk by everything else. Where it is not there, `warmup` fails with the reason
+ * and the command that fixes it. Nothing falls back.
  */
 export class TransformersEmbeddingProvider implements EmbeddingProvider {
   readonly identity: EmbeddingIdentity;
   private readonly batchSize: number;
   private readonly device: string;
+  private readonly allowDownload: boolean;
   /** The device actually in use, which may be a downgrade from the requested one. */
   activeDevice: string | null = null;
   private pipeline: ((texts: string[], options: object) => Promise<{ tolist(): number[][] }>) | null = null;
@@ -40,18 +45,33 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     this.device = options.device
       ?? process.env.MEMORY_LAYER_EMBED_DEVICE?.trim().toLowerCase()
       ?? DEFAULT_EMBEDDING_CONFIG.device;
+    this.allowDownload = options.allowDownload ?? false;
   }
 
   async warmup(): Promise<void> {
     if (this.pipeline) return;
+
+    // Checked before transformers is touched. Left to the loader, a missing model
+    // is a download -- 130 MB, mid-search, or a hang on a machine with no network
+    // -- and a missing file it cannot fetch surfaces as a message about paths.
+    if (!this.allowDownload) {
+      const missing = missingModelFiles(this.identity.model);
+      if (missing.length > 0) {
+        throw new Error(
+          `The embedding model ${this.identity.model} is not downloaded ` +
+            `(${missing.join(', ')} missing under ${modelCacheDir()}). ` +
+            'Run `node bin/setup.mjs` with network access; nothing else downloads it.',
+        );
+      }
+    }
 
     let transformers: { pipeline: (task: string, model: string, options: object) => Promise<unknown> };
     try {
       transformers = require('@huggingface/transformers');
     } catch (err) {
       throw new Error(
-        `@huggingface/transformers is not installed. Install it, or run with ` +
-          `MEMORY_LAYER_EMBEDDINGS=hash to use the offline fallback. (${message(err)})`,
+        `@huggingface/transformers is not installed, so the plugin's dependencies are ` +
+          `incomplete. Run \`node bin/setup.mjs --force\`. (${message(err)})`,
       );
     }
 
@@ -65,8 +85,13 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     // could see: "File doesn't exist". That reads as a blocked network, and was
     // recorded as one for weeks. It was a path length.
     try {
-      const env = (transformers as { env?: { cacheDir?: string } }).env;
-      if (env) env.cacheDir = modelCacheDir();
+      const env = (transformers as { env?: { cacheDir?: string; allowRemoteModels?: boolean } }).env;
+      if (env) {
+        env.cacheDir = modelCacheDir();
+        // The presence check above is the real gate; this is the second lock,
+        // for a file that exists but is not the one the loader asks for.
+        env.allowRemoteModels = this.allowDownload;
+      }
     } catch {
       // A future version may not expose env; the default path still works
       // wherever it is short enough.
@@ -89,7 +114,7 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
       try {
         this.pipeline = (await transformers.pipeline('feature-extraction', this.identity.model, {
           device,
-          dtype: 'q8',
+          dtype: MODEL_DTYPE,
         })) as typeof this.pipeline;
         this.activeDevice = device;
         if (device !== this.device) {
@@ -106,10 +131,10 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
     } catch (err) {
       throw new Error(
         `Could not load embedding model ${this.identity.model}: ${message(err)}. ` +
-          `The first run downloads it into ${modelCacheDir()}. A "File doesn't exist" ` +
-          `here usually means that path is too long for the platform rather than that ` +
-          `the download was blocked -- set MEMORY_LAYER_MODEL_CACHE to somewhere shorter. ` +
-          `On a machine with no model access at all, set MEMORY_LAYER_EMBEDDINGS=hash.`,
+          `It is cached in ${modelCacheDir()}. A "File doesn't exist" here usually means ` +
+          `that path is too long for the platform rather than that the download was ` +
+          `blocked -- set MEMORY_LAYER_MODEL_CACHE to somewhere shorter, then run ` +
+          `\`node bin/setup.mjs\` again.`,
       );
     }
   }
@@ -140,17 +165,4 @@ export class TransformersEmbeddingProvider implements EmbeddingProvider {
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/**
- * Where model weights live: short, stable, and outside any package directory.
- *
- * Outside, because a cache inside `node_modules` is deleted on every reinstall
- * and re-downloaded for no reason. Short, because the platform has a limit and
- * exceeding it fails as a missing file rather than as a path error.
- */
-export function modelCacheDir(): string {
-  const configured = process.env.MEMORY_LAYER_MODEL_CACHE?.trim();
-  if (configured) return nodePath.resolve(configured);
-  return nodePath.join(globalDir(), 'models');
 }

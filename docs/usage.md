@@ -101,13 +101,13 @@ tokenizer          ok      unicode-fold-v3
 astChunking        ok      web-tree-sitter -- 36 languages
 ```
 
-`embeddings WARN hash` means the model did not load and search is running on a
-lexical fallback. It still works; it just cannot match a question phrased
-differently from the text. The model is downloaded by `init` itself, into
+The model is downloaded by `node bin/setup.mjs`, into
 `<MEMORY_LAYER_HOME>/models` -- measured at 130 MB for
 `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, a minute or two on a home
-connection. A machine that has run `init` once works offline afterwards, and
-the cache can be copied to another machine.
+connection. Nothing else downloads it, and nothing runs without it: search,
+write and ingest refuse with a message naming the setup script. A machine that
+has run setup once works offline afterwards, and the cache can be copied to
+another machine.
 
 Then load the project:
 
@@ -426,7 +426,7 @@ What is actually working. Run it when results feel wrong, and in CI:
 
 | Line | Meaning when it complains |
 |---|---|
-| `embeddings WARN hash` | The model did not load; semantic search is lexical |
+| `embedding model FAIL` | The model is not on disk — `node bin/setup.mjs`. Nothing that embeds will run until it is |
 | `tokenizer version FAIL` | Postings predate this build — `dai-memory ingest --force` |
 | `model drift WARN` | Stored vectors are from another model — `dai-memory embed --force` |
 | `keyword index WARN` | Some nodes are invisible to keyword search |
@@ -661,7 +661,6 @@ feature.
 | `MEMORY_LAYER_HOME` | Registry and model cache (default `~/.memory-layer`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Model weights, if you need them elsewhere |
 | `MEMORY_LAYER_EMBED_DEVICE` | Accelerator for the model (default `cpu`) |
-| `MEMORY_LAYER_EMBEDDINGS=hash` | Skip the model; lexical fallback only. The default is `local`, which fails rather than degrade |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Record failed commands automatically |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Byte cap on MCP tool output (default 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Token budget before Read/Grep/Glob (default 400) |

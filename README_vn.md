@@ -55,11 +55,11 @@ Rồi chạy một lần, trong thư mục plugin vừa cài:
 node bin/setup.mjs
 ```
 
-Cài plugin chỉ là **chép repo về** — nó không cài dependency, cũng không biên
-dịch TypeScript, mà đây là một workspace TypeScript. `setup.mjs` làm cả hai việc
-đó rồi kiểm tra xem file mà mọi lối vào đều chạy có thật sự sinh ra chưa. Chừng
-nào chưa chạy, lúc mở phiên nó sẽ nói ra, thay vì im lặng: một plugin trông như
-đã cài mà không làm gì cả mới là hỏng nặng hơn.
+Cài plugin chỉ là **chép repo về** — nó không cài dependency, không biên dịch
+TypeScript, không tải model embedding, mà plugin này cần cả ba. `setup.mjs` làm
+cả ba và kiểm tra từng thứ đã thật sự có. Chừng nào chưa xong, plugin từ chối
+chạy và lúc mở phiên nó nói rõ vì sao, thay vì im lặng: một plugin trông như đã
+cài mà không làm gì cả mới là hỏng nặng hơn.
 
 Cài xong khởi động lại Claude Code để MCP server chạy. `.mcp.json` đăng ký
 server và `hooks/` nối nó vào phiên; không cần cấu hình tay gì thêm.
@@ -67,7 +67,7 @@ server và `hooks/` nối nó vào phiên; không cần cấu hình tay gì thê
 ### Từ bản clone
 
 ```bash
-node bin/setup.mjs                      # hoặc: pnpm install && pnpm build
+node bin/setup.mjs                      # thư viện, build và model -- đủ cả ba
 
 node bin/dai-memory.mjs init            # kho, quét, code graph, trang xem
 node bin/dai-memory.mjs search "vì sao thử lại thẻ bị từ chối"
@@ -77,14 +77,24 @@ node bin/dai-memory.mjs search "vì sao thử lại thẻ bị từ chối"
 liệu và mã nguồn, dựng code graph, rồi ghi `.memory/ui.html` — mở file đó bằng
 trình duyệt là thấy nó tìm được gì.
 
-Model embedding là **một phần của việc cài**, không phải thứ `init` nhặt được
-thì dùng. `setup.mjs` tải nó về (khoảng 130 MB, cache ở máy) và **hỏng nếu không
-tải được** — và mặc định `init` từ chối tạo kho khi thiếu nó. Một cái kho dựng
-bằng bản dự phòng từ vựng vẫn trả lời mọi câu hỏi, chỉ là tệ hơn, theo cái kiểu
+**Cài xong nghĩa là đủ cả ba: thư viện, build, và model embedding.**
+`setup.mjs` làm theo đúng thứ tự đó và dừng kèm lý do ở bước đầu tiên bị hỏng;
+chạy lại thì làm tiếp từ chỗ đã dừng. Không có lối tắt nào bỏ qua model —
+chỉ `pnpm install && pnpm build` thôi thì plugin sẽ từ chối chạy.
+
+Chừng nào chưa đủ cả ba:
+
+- MCP server không khởi động, và nói rõ thiếu gì;
+- lúc mở phiên cũng báo như vậy, ở mọi dự án;
+- `search`, `why`, `write`, `ingest` và `merge` từ chối, chỉ đích danh
+  `setup.mjs` — chúng không bao giờ tự tải model, và không bao giờ chạy khi thiếu;
+- `doctor` vẫn chạy, và báo FAIL ở dòng `embedding model`.
+
+Không có đường lùi. Từng có — đặc trưng băm từ vựng, lúc đầu tự động rồi sau
+thành tuỳ chọn — và cái kho dựng bằng nó vẫn trả lời mọi câu hỏi, chỉ là tệ hơn,
 không phân biệt được với đang chạy tốt, cho tới lúc cả lịch sử dự án đã nằm
-trong một không gian vector không so sánh được với không gian thật.
-`MEMORY_LAYER_EMBEDDINGS=hash` là lựa chọn cố ý cho máy sẽ không bao giờ với tới
-được model hub.
+trong một không gian vector không so sánh được với không gian của model. Bộ băm
+từ vựng giờ chỉ còn cho test suite.
 
 Cài vào một codebase **đã tồn tại** chính là trường hợp hệ này sinh ra để phục
 vụ, nên không có chỗ nào giả định repo trống.
@@ -314,7 +324,7 @@ ký ức semantic thì không. Phân rã là hạ hạng, không phải xoá.
 
 | Biến | Tác dụng |
 |---|---|
-| `MEMORY_LAYER_EMBEDDINGS` | `local` (mặc định: bắt buộc model thật, không có thì hỏng), `auto` (có gì dùng nấy), `hash` (chỉ dự phòng từ vựng) |
+| `MEMORY_LAYER_MODEL_CACHE` | Nơi cache model (mặc định `<MEMORY_LAYER_HOME>/models`) |
 | `MEMORY_LAYER_EMBED_DEVICE` | Thiết bị chạy model, ví dụ `dml`, `cuda`. Mặc định `cpu`: thử accelerator hỏng làm process crash lúc thoát |
 | `MEMORY_LAYER_DIMS` | Độ rộng vector lúc `init`. Cố định sau đó. |
 | `MEMORY_LAYER_HOME` | Registry, log và cache model (mặc định `~/.memory`) |

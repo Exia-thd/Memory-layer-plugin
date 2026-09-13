@@ -5,19 +5,33 @@
  * `.mcp.json` and the hooks used to point straight at `packages/cli/dist/cli.js`.
  * That path is correct on a machine where somebody has already run a build, and
  * missing on every machine where they have not -- which includes every fresh
- * plugin install. Going through here means a missing build is reported as a
- * missing build, in the one place a person reads when a tool does not appear:
- * the MCP server's own stderr.
+ * plugin install. Going through here means an incomplete install is reported as
+ * one, in the place a person reads when a tool does not appear: the MCP server's
+ * own stderr.
  *
- * When the build is there this costs one stat call and an import. The CLI is
- * imported rather than spawned, so there is no second process and no second
- * Node startup -- `process.argv` already holds the arguments it reads.
+ * The MCP server requires everything, model included: it is how an agent uses
+ * the plugin, and an agent cannot act on a half-installed one. Other commands
+ * require only the build, so that `doctor` and `--help` still run on exactly the
+ * machine where something is missing -- and each command that needs the model
+ * refuses on its own, with the same instruction.
+ *
+ * When everything is in place this costs a few stat calls and an import. The CLI
+ * is imported rather than spawned, so there is no second Node startup --
+ * `process.argv` already holds the arguments it reads.
  */
 import { pathToFileURL } from 'node:url';
-import { CLI_PATH, isBuilt, setupMessage } from './resolve-cli.mjs';
+import { CLI_PATH, isBuilt, readiness, setupMessage } from './resolve-cli.mjs';
 
-if (!isBuilt()) {
-  process.stderr.write(`${setupMessage()}\n`);
+const command = process.argv[2];
+
+if (command === 'serve') {
+  const state = await readiness();
+  if (!state.ready) {
+    process.stderr.write(`${setupMessage(state)}\n`);
+    process.exit(1);
+  }
+} else if (!isBuilt()) {
+  process.stderr.write(`${setupMessage(await readiness())}\n`);
   process.exit(1);
 }
 

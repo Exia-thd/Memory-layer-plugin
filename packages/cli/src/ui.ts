@@ -1,8 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { MemoryStore, conflicts, doctor, type MemoryNode } from '@memory-layer/core';
+import { MemoryStore, conflicts, doctor, expectedIdentity, type MemoryNode } from '@memory-layer/core';
 import { storeDirOrThrow, resolveProject } from './project.js';
-import { embedder } from './api.js';
 import { renderUi, type UiPayload } from './ui-template.js';
 
 /**
@@ -56,7 +55,6 @@ export async function buildUi(
   const project = resolveProject(options.from);
 
   {
-    const provider = await embedder(store.dimensions);
 
     // One at a time, not Promise.all.
     //
@@ -65,7 +63,7 @@ export async function buildUi(
     // Promise.all and every query after the first failed with "Cannot read
     // properties of null". Reading five things in sequence costs nothing here
     // and is the only correct way to use this handle.
-    const report = await doctor(store, provider?.identity ?? null);
+    const report = await doctor(store, expectedIdentity(store.dimensions));
     const allNodes = await store.allNodes();
     const allEdges = await store.allEdges();
     const symbols = await store.symbolMap(options.prefix);

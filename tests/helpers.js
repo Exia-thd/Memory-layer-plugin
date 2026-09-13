@@ -48,7 +48,11 @@ export function env(repo, extra = {}) {
   return {
     ...process.env,
     MEMORY_LAYER_HOME: repo.home,
+    // The hash embedder is refused everywhere except a test run, and this is the
+    // one place that declares one. It keeps the suite fast and off the network;
+    // tests/real-model.test.js is where the shipped embedder is exercised.
     MEMORY_LAYER_EMBEDDINGS: 'hash',
+    MEMORY_LAYER_TEST: '1',
     MEMORY_LAYER_LOG_LEVEL: 'error',
     ...extra,
   };

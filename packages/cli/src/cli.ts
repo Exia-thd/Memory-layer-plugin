@@ -107,7 +107,7 @@ function formatIgnored(ignored: IgnoredFile[], verbose: boolean): string {
 const USAGE = `dai-memory - project memory layer
 
   dai-memory init [paths...] [--no-scan]  create the store, scan the project, build the viewer
-  dai-memory ingest [paths...] [--layer L] [--force] [--no-embed] [--no-ui]
+  dai-memory ingest [paths...] [--layer L] [--force] [--no-ui]
                           [--verbose] [--quiet] [--max-file-size MB]  no paths: scan the project
   dai-memory embed [--force]              embed nodes missing a current vector
   dai-memory index <query> [--limit N] [--offset N] [--layer L] [--json]
@@ -270,7 +270,6 @@ async function main(argv: string[]): Promise<number> {
       const { storeDir, report, scanned, page } = await api.init({
         dimensions: stringFlag(args, 'dims'),
         scan: targets,
-        embed: !args.flags['no-embed'],
         ui: !args.flags['no-ui'],
       });
       process.stdout.write(`store created at ${storeDir}\n\n${formatReport(report)}\n`);
@@ -300,7 +299,6 @@ ${scanned.created} memories, ${scanned.symbols} declarations from ${scanned.file
       const report = await api.runIngest(paths, {
         layer: layerFlag(args),
         force: Boolean(args.flags.force),
-        embed: !args.flags['no-embed'],
         maxFileBytes: maxFileBytes(args),
       });
       if (!args.flags.quiet) emit(args, report, () =>

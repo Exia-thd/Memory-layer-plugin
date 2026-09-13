@@ -19,7 +19,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const { CLI_PATH: CLI, isBuilt, setupMessage } = await import(
+const { CLI_PATH: CLI, readiness, setupMessage } = await import(
   pathToFileURL(path.join(HERE, '..', 'bin', 'resolve-cli.mjs')).href
 );
 const BUDGET_MS = 7000;
@@ -86,17 +86,22 @@ try {
 
   // Said before the store check, not after it.
   //
-  // An unbuilt plugin cannot run `init`, so there is never a store, so a notice
-  // placed after that check would never be reached -- which is precisely how
-  // this failure stayed invisible: the one condition that needs reporting is
+  // An incomplete install cannot run `init`, so there is never a store, so a
+  // notice placed after that check would never be reached -- which is precisely
+  // how this failure stayed invisible: the one condition that needs reporting is
   // the one that skips the report. Only session start says it; a notice on
   // every Read and Grep would be noise about the same thing.
-  if (!isBuilt()) {
+  //
+  // The model counts as part of the install. Without it every command the other
+  // hooks run refuses, so staying quiet here would leave them failing one by one
+  // into a log file, which is the silence this check exists to end.
+  const state = await readiness();
+  if (!state.ready) {
     if (mode === 'session-start') {
       emit({
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
-          additionalContext: setupMessage(),
+          additionalContext: setupMessage(state),
         },
       });
     }

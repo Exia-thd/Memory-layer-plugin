@@ -26,9 +26,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_EMBEDDING_CONFIG } from '@memory-layer/core';
+import os from 'node:os';
+import path from 'node:path';
 import { makeRepo, cliRaw } from './helpers.js';
 
-const REAL = { MEMORY_LAYER_EMBEDDINGS: 'local' };
+// The machine's own model cache, not one per fixture. Every fixture gets a fresh
+// MEMORY_LAYER_HOME, and the cache defaults to living inside it -- so each test
+// downloaded 130 MB into a directory it then deleted. An explicit cache setting
+// is honoured over the default location; an existing one is reused.
+const SHARED_CACHE = process.env.MEMORY_LAYER_MODEL_CACHE
+  ?? path.join(os.homedir(), '.memory', 'models');
+
+const REAL = { MEMORY_LAYER_EMBEDDINGS: '', MEMORY_LAYER_TEST: '', MEMORY_LAYER_MODEL_CACHE: SHARED_CACHE };
 
 test('the default device is the one that does not crash on the way out', () => {
   // `auto` and `cpu` both end up running the same CPU session here; the

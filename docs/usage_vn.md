@@ -104,11 +104,11 @@ tokenizer          ok      unicode-fold-v3
 astChunking        ok      web-tree-sitter -- 36 languages
 ```
 
-`embeddings WARN hash` nghĩa là model không nạp được và tìm kiếm đang chạy bằng
-bản dự phòng từ vựng. Vẫn dùng được, chỉ là không khớp được câu hỏi diễn đạt khác
-với văn bản. Model được tải ngay ở bước `init` — đo thật: **130 MB** cho
+Model được tải bởi `node bin/setup.mjs` — đo thật: **130 MB** cho
 `Xenova/paraphrase-multilingual-MiniLM-L12-v2`, vào `<MEMORY_LAYER_HOME>/models`.
-Máy nào đã chạy `init` một lần thì sau đó chạy offline được.
+Không lệnh nào khác tải nó, và không lệnh nào chạy khi thiếu nó: search, write
+và ingest từ chối kèm thông báo chỉ đích danh script setup. Máy nào đã chạy setup
+một lần thì sau đó chạy offline được.
 
 Rồi mở trang nó vừa ghi:
 
@@ -433,7 +433,7 @@ Cái gì đang thực sự chạy. Chạy khi kết quả có vẻ sai, và ch�
 
 | Dòng | Nghĩa là gì khi nó kêu |
 |---|---|
-| `embeddings WARN hash` | Model không nạp được; tìm kiếm ngữ nghĩa đang là từ vựng |
+| `embedding model FAIL` | Model chưa có trên đĩa — `node bin/setup.mjs`. Mọi thứ cần embed đều không chạy cho tới khi có |
 | `tokenizer version FAIL` | Postings cũ hơn bản build này — `dai-memory ingest --force` |
 | `model drift WARN` | Vector đã lưu thuộc model khác — `dai-memory embed --force` |
 | `keyword index WARN` | Một số node vô hình với tìm kiếm từ khoá |
@@ -665,7 +665,6 @@ một khách hàng xuất hiện trong repo khác là một sự cố, không ph
 | `MEMORY_LAYER_HOME` | Registry và cache model (mặc định `~/.memory-layer`) |
 | `MEMORY_LAYER_MODEL_CACHE` | Trọng số model, nếu bạn cần để chỗ khác |
 | `MEMORY_LAYER_EMBED_DEVICE` | Thiết bị chạy model (mặc định `cpu`) |
-| `MEMORY_LAYER_EMBEDDINGS=hash` | Bỏ qua model; chỉ dự phòng từ vựng. Mặc định là `local`, thà hỏng chứ không tự hạ cấp |
 | `MEMORY_LAYER_AUTO_RECORD=1` | Tự ghi lệnh thất bại |
 | `MEMORY_LAYER_OUTPUT_BUDGET` | Trần byte cho output tool MCP (mặc định 24000) |
 | `MEMORY_LAYER_HOOK_TOKENS` | Ngân sách token trước Read/Grep/Glob (mặc định 400) |

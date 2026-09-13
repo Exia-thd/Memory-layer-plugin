@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Turns a copied repository into a working plugin: dependencies, then a build.
+ * Turns a copied repository into a working plugin: dependencies, a build, and
+ * the embedding model -- all three, or a failure that says which one is missing.
  *
  * This exists because the install instructions were three commands and a
  * precondition -- enable corepack, install, build, and know that the workspace
@@ -99,23 +100,44 @@ if (rebuild) {
  * degradation into one failed command with a reason.
  */
 process.stdout.write('\n3/3 embedding model (about 130 MB on the first run)\n');
-const { selectProvider, parseDimensions } = await import(
-  pathToFileURL(path.join(PLUGIN_ROOT, 'packages', 'core', 'dist', 'index.js')).href
-);
+
+let core;
+try {
+  core = await import(pathToFileURL(path.join(PLUGIN_ROOT, 'packages', 'core', 'dist', 'index.js')).href);
+} catch (err) {
+  // Built output without the dependencies it imports: node_modules was removed
+  // or never finished. The build step is skipped when output exists, so say how
+  // to force it rather than letting the stack trace be the message.
+  process.stderr.write(
+    `\nThe build is present but cannot load (${err instanceof Error ? err.message : String(err)}).\n` +
+    'Run this script again with --force to reinstall dependencies and rebuild.\n',
+  );
+  process.exit(1);
+}
 
 try {
-  const choice = await selectProvider(parseDimensions(process.env.MEMORY_LAYER_DIMS));
+  const choice = await core.selectProvider(core.parseDimensions(process.env.MEMORY_LAYER_DIMS), {
+    allowDownload: true,
+  });
+  // Loaded is not the same as on disk. Every later command reads the model from
+  // the cache without downloading, so the files themselves are the thing that
+  // has to be true before this can report success.
+  const missing = core.missingModelFiles();
+  if (missing.length > 0) {
+    throw new Error(
+      `The model loaded, but ${missing.join(', ')} did not reach ${core.modelCacheDir()}, ` +
+      'so no later command could read it. Check that directory is writable, or set ' +
+      'MEMORY_LAYER_MODEL_CACHE to one that is.',
+    );
+  }
   const { model, provider } = choice.provider.identity;
-  process.stdout.write(`    ${provider}: ${model}\n`);
+  process.stdout.write(`    ${provider}: ${model}\n    cached in ${core.modelCacheDir()}\n`);
 } catch (err) {
   process.stderr.write(
     `\n${err instanceof Error ? err.message : String(err)}\n\n` +
-    'Setup stopped. Dependencies and the build are in place, but without the model\n' +
-    'this would index a project into a vector space that cannot be compared with\n' +
-    'the real one -- so the setup does not report success.\n\n' +
-    'Re-run this script with network access. On a machine that will never have it,\n' +
-    'MEMORY_LAYER_EMBEDDINGS=hash is the deliberate opt-in to lexical-only search;\n' +
-    'set it in the environment the plugin runs in, not just for this command.\n',
+    'Setup stopped. Dependencies and the build are in place, but the plugin does not\n' +
+    'run without the embedding model, so the setup does not report success.\n' +
+    'Re-run this script with network access; it picks up from here.\n',
   );
   process.exit(1);
 }

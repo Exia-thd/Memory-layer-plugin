@@ -5,6 +5,7 @@ import type { MemoryStore } from './store/store.js';
 import { pendingCount } from './store/journal.js';
 import { summarizeCapability } from './store/capabilities.js';
 import { identityLabel, type EmbeddingIdentity } from './embed/types.js';
+import { embeddingReadiness } from './embed/model-cache.js';
 import { probeAstChunking, relationLanguages } from './ingest/languages.js';
 import { CHUNKER_VERSION } from './ingest/chunker.js';
 
@@ -79,6 +80,17 @@ export async function doctor(
       (recorded && recorded.status !== ast.status
         ? ` (recorded as ${recorded.status} at init; it has changed since)`
         : ''),
+  });
+
+  // Whether this machine can embed at all, checked on disk rather than by
+  // loading the model. It fails rather than warns: without the model, search,
+  // write, ingest and the MCP server all refuse to run, so a store that is
+  // otherwise healthy is not usable here.
+  const readiness = embeddingReadiness();
+  checks.push({
+    name: 'embedding model',
+    status: readiness.ready ? 'ok' : 'fail',
+    detail: readiness.ready ? 'present' : readiness.problem ?? 'unavailable',
   });
 
   if (stats) {

@@ -109,29 +109,82 @@ test('a built plugin passes arguments through to the CLI unchanged', () => {
 });
 
 /**
- * The embedding model is part of the install, not an optional extra.
+ * The embedding model is part of the install. There is no fallback.
  *
- * The default used to be `auto`: try the real model, and where it could not be
- * had, build the store out of hashed token features instead. The downgrade was
- * recorded in the capability block, and that was treated as enough. It is not.
- * Nobody reads a capability block at install time, and the store that comes out
- * answers every question with something -- just worse, in a way indistinguishable
- * from working until months of a project's history are sitting in the wrong
- * vector space.
- *
- * So the default refuses. The fallback still exists for a machine that will
- * never reach a model hub, but it is now something a person typed.
+ * It was once what happened automatically when the model could not be had, and
+ * then something anyone could select. Either way the store that came out
+ * answered every question with something, in a vector space that cannot be
+ * compared with the model's, with nothing in the results to say so. The hash
+ * embedder now exists for this suite alone, behind MEMORY_LAYER_TEST=1.
  */
-test('the default embedding mode demands the real model', async () => {
+test('the model is required, and the fallback answers only to the test suite', async () => {
   const { embeddingMode } = await import('@memory-layer/core');
 
-  assert.equal(embeddingMode({}), 'local', 'an unset environment no longer degrades silently');
-  assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'hash' }), 'hash');
-  assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'auto' }), 'auto');
+  assert.equal(embeddingMode({}), 'local');
   assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'LOCAL' }), 'local');
-
-  // A value nobody recognises resolves to the strict mode, not the lenient one.
-  // A typo in a deployment script must not be a quiet downgrade.
+  // A value nobody recognises is the strict mode, never a lenient one: a typo in
+  // a deployment script must not become a quiet downgrade.
   assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'hashh' }), 'local');
-  assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: '' }), 'local');
+
+  assert.equal(embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'hash', MEMORY_LAYER_TEST: '1' }), 'hash');
+  assert.throws(
+    () => embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'hash' }),
+    /test suite only/,
+    'the lexical fallback is selectable outside a test run',
+  );
+  // Refused by name. Somebody who set `auto` expects a fallback and has to find
+  // out they are no longer getting one, not have it silently mean something else.
+  assert.throws(() => embeddingMode({ MEMORY_LAYER_EMBEDDINGS: 'auto' }), /no longer supported/);
+});
+
+/** Everything present except the model: a built tree and an empty model cache. */
+function withoutModel(extra = {}) {
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'memnomodel-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'memnohome-'));
+  const env = { ...process.env, MEMORY_LAYER_MODEL_CACHE: cache, MEMORY_LAYER_HOME: home, ...extra };
+  delete env.MEMORY_LAYER_EMBEDDINGS;
+  delete env.MEMORY_LAYER_TEST;
+  return {
+    env,
+    cleanup: () => {
+      fs.rmSync(cache, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+test('the MCP server will not start without the model', () => {
+  const machine = withoutModel();
+  try {
+    const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin', 'dai-memory.mjs'), 'serve'], {
+      env: machine.env,
+      input: '',
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    assert.notEqual(result.status, 0, 'a server with no model started as if installed');
+    assert.match(result.stderr, /not downloaded/, result.stderr);
+    assert.match(result.stderr, /setup\.mjs/, result.stderr);
+  } finally {
+    machine.cleanup();
+  }
+});
+
+test('session start reports a missing model, not only a missing build', () => {
+  const machine = withoutModel();
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'memproj-'));
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(REPO_ROOT, 'hooks', 'memory-hook.mjs'), 'session-start'],
+      { input: JSON.stringify({ cwd }), env: machine.env, encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const context = JSON.parse(result.stdout)?.hookSpecificOutput?.additionalContext ?? '';
+    assert.match(context, /not downloaded/, result.stdout);
+    assert.match(context, /setup\.mjs/, result.stdout);
+  } finally {
+    machine.cleanup();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });

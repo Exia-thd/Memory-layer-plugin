@@ -54,11 +54,12 @@ Then, once, from the installed plugin directory:
 node bin/setup.mjs
 ```
 
-Installing a plugin copies the repository — it does not install dependencies or
-compile TypeScript, and this one is a TypeScript workspace. `setup.mjs` does
-both and checks that the file every entry point runs actually came out. Until
-it has run, session start says so rather than staying quiet: a plugin that
-looks installed and silently does nothing is the worse failure.
+Installing a plugin copies the repository — it does not install dependencies,
+compile TypeScript or download the embedding model, and this plugin needs all
+three. `setup.mjs` does them and checks each one actually landed. Until it has
+finished, the plugin refuses to run and session start says why, rather than
+staying quiet: a plugin that looks installed and silently does nothing is the
+worse failure.
 
 Restart Claude Code afterwards so the MCP server starts. `.mcp.json` registers
 it and `hooks/` wires it into the session; nothing else needs configuring.
@@ -66,7 +67,7 @@ it and `hooks/` wires it into the session; nothing else needs configuring.
 ### From a clone
 
 ```bash
-node bin/setup.mjs                      # or: pnpm install && pnpm build
+node bin/setup.mjs                      # dependencies, build and model -- all three
 
 node bin/dai-memory.mjs init            # store, scan, code graph, viewer
 node bin/dai-memory.mjs search "why do we retry declined cards"
@@ -76,14 +77,25 @@ node bin/dai-memory.mjs search "why do we retry declined cards"
 documentation and source, builds the code graph, and writes `.memory/ui.html` —
 open that in a browser to see what it found.
 
-The embedding model is part of the install, not something `init` acquires if it
-happens to be convenient. `setup.mjs` downloads it (about 130 MB, cached
-locally) and **fails if it cannot** — and by default `init` refuses to create a
-store without it. A store built from the lexical fallback answers every question
-with something, just worse, in a way indistinguishable from working until a
-project's whole history is sitting in a vector space that cannot be compared
-with the real one. `MEMORY_LAYER_EMBEDDINGS=hash` is the deliberate opt-in for a
-machine that will never reach a model hub.
+**Installed means all three: dependencies, build, and the embedding model.**
+`setup.mjs` does them in that order and stops with a reason at the first one
+that fails; re-running it picks up where it stopped. There is no shortcut that
+skips the model — `pnpm install && pnpm build` alone leaves a plugin that
+refuses to run.
+
+Until all three are in place:
+
+- the MCP server does not start, and says what is missing;
+- session start says it too, in every project;
+- `search`, `why`, `write`, `ingest` and `merge` refuse, naming `setup.mjs` —
+  they never download the model themselves, and never run without it;
+- `doctor` still runs, and fails on the `embedding model` line.
+
+There is no fallback. There used to be one — lexical hash features, first
+automatic and then selectable — and a store built with it answered every
+question with something, just worse, indistinguishable from working until a
+project's whole history sat in a vector space that cannot be compared with the
+model's. The hash embedder remains only for the test suite.
 
 Installing into a codebase that already exists is the case this is for, so
 nothing about it assumes an empty repository.
@@ -318,7 +330,7 @@ semantic ones do not. Decay demotes; it does not remove.
 
 | Variable | Effect |
 |---|---|
-| `MEMORY_LAYER_EMBEDDINGS` | `local` (default: require the real model, fail without it), `auto` (take whichever is available), `hash` (lexical fallback only) |
+| `MEMORY_LAYER_MODEL_CACHE` | Where the model is cached (default `<MEMORY_LAYER_HOME>/models`) |
 | `MEMORY_LAYER_EMBED_DEVICE` | Accelerator for the model, e.g. `dml`, `cuda`. Default `cpu`: a failed accelerator probe crashed the process at exit |
 | `MEMORY_LAYER_DIMS` | Vector width at `init`. Fixed thereafter. |
 | `MEMORY_LAYER_HOME` | Registry, logs and model cache (default `~/.memory`) |

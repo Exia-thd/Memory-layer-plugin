@@ -1,12 +1,15 @@
 import { HashEmbeddingProvider } from './hash-provider.js';
 import { TransformersEmbeddingProvider } from './transformers-provider.js';
-import type { EmbeddingProvider } from './types.js';
+import { embeddingMode } from './model-cache.js';
+import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingIdentity, type EmbeddingProvider } from './types.js';
 import type { Capability } from '../types.js';
-import { log } from '../util/log.js';
 
 export * from './types.js';
 export { HashEmbeddingProvider, normalize } from './hash-provider.js';
 export { TransformersEmbeddingProvider } from './transformers-provider.js';
+export {
+  embeddingMode, embeddingReadiness, missingModelFiles, modelCacheDir, MODEL_DTYPE,
+} from './model-cache.js';
 
 export interface ProviderChoice {
   provider: EmbeddingProvider;
@@ -14,38 +17,25 @@ export interface ProviderChoice {
 }
 
 /**
- * What was asked for, before anything is loaded.
+ * The embedding model, or an error that says why there is none.
  *
- * The default used to be `auto`, which meant: try the real model, and if it
- * cannot be had, quietly build the store out of hashed token features instead.
- * The capability block recorded the downgrade honestly, and that was treated as
- * enough. It is not. Nobody reads a capability block at install time, and the
- * store that comes out answers every question with something -- just worse, in
- * a way that looks exactly like working. A degraded store is the expensive kind
- * of broken: it is discovered months later, by which time it holds a project's
- * whole history in the wrong vector space.
+ * There is no fallback. There used to be two -- an automatic one, and later a
+ * selectable one -- and both produced a store that answers every question with
+ * something, in a vector space that cannot be compared with the model's, with
+ * nothing in the results to say so. The hash embedder remains only for the test
+ * suite; see `embeddingMode`.
  *
- * So the default is `local`: get the real model or fail. `auto` still exists
- * for anyone who wants the old behaviour, and `hash` for a machine that will
- * never reach a model hub -- but both are now something a person chose.
+ * `allowDownload` separates the two moments that may fetch the model -- setup,
+ * and `init` on a new machine -- from everything else. A search that discovers
+ * the model is missing and quietly spends a minute downloading 130 MB is not a
+ * search, and on a machine without network it is a hang that looks like one.
+ * Everywhere else, a missing model is an error naming the command that fixes it.
  */
-export function embeddingMode(env: NodeJS.ProcessEnv = process.env): 'local' | 'auto' | 'hash' {
-  const requested = (env.MEMORY_LAYER_EMBEDDINGS ?? 'local').trim().toLowerCase();
-  return requested === 'hash' || requested === 'auto' ? requested : 'local';
-}
-
-/**
- * Picks an embedding provider and says, in the returned capability, exactly what
- * was picked and why.
- *
- * Falling back happens only where it was asked for, and never quietly. A store
- * embedded by the hash fallback is a different vector space from one embedded
- * by the real model, and the capability block is where that stays visible.
- */
-export async function selectProvider(dimensions: number): Promise<ProviderChoice> {
-  const requested = embeddingMode();
-
-  if (requested === 'hash') {
+export async function selectProvider(
+  dimensions: number,
+  options: { allowDownload?: boolean } = {},
+): Promise<ProviderChoice> {
+  if (embeddingMode() === 'hash') {
     const provider = new HashEmbeddingProvider(dimensions);
     return {
       provider,
@@ -54,47 +44,41 @@ export async function selectProvider(dimensions: number): Promise<ProviderChoice
         status: 'degraded',
         model: provider.identity.model,
         dimensions,
-        reason:
-          'MEMORY_LAYER_EMBEDDINGS=hash: lexical hash features, not a language model. ' +
-          'Semantic search will only match wording that overlaps.',
+        reason: 'MEMORY_LAYER_TEST=1: lexical hash features for the test suite, not a language model.',
       },
     };
   }
 
-  const local = new TransformersEmbeddingProvider({ dimensions });
+  const local = new TransformersEmbeddingProvider({
+    dimensions,
+    allowDownload: options.allowDownload ?? false,
+  });
+  await local.warmup();
+  return {
+    provider: local,
+    capability: {
+      provider: 'local',
+      status: 'available',
+      model: local.identity.model,
+      dimensions,
+    },
+  };
+}
+
+/**
+ * The vector space this process would embed into, without loading anything.
+ *
+ * For reports. `doctor` compares it against the store to find drift, and it has
+ * to keep working on exactly the machines where the model is missing -- those
+ * are the machines somebody runs `doctor` on. Null when the environment itself
+ * is refused.
+ */
+export function expectedIdentity(dimensions: number): EmbeddingIdentity | null {
   try {
-    await local.warmup();
-    return {
-      provider: local,
-      capability: {
-        provider: 'local',
-        status: 'available',
-        model: local.identity.model,
-        dimensions,
-      },
-    };
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-
-    if (requested === 'local') {
-      // The default path. Refusing beats writing vectors from a different space
-      // into somebody's store on the strength of a line in a report they will
-      // not read until the search results have been disappointing for a month.
-      throw err;
-    }
-
-    log('warn', 'falling back to the hash embedder', reason);
-
-    const provider = new HashEmbeddingProvider(dimensions);
-    return {
-      provider,
-      capability: {
-        provider: 'hash',
-        status: 'degraded',
-        model: provider.identity.model,
-        dimensions,
-        reason: `Local model unavailable, using the lexical fallback. ${reason}`,
-      },
-    };
+    return embeddingMode() === 'hash'
+      ? new HashEmbeddingProvider(dimensions).identity
+      : { model: DEFAULT_EMBEDDING_CONFIG.modelId, dimensions, provider: 'local' };
+  } catch {
+    return null;
   }
 }

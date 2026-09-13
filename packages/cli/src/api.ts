@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import nodePath from 'node:path';
 import {
   MemoryStore, StoreLockedError, ingest, search, neighbors, clusters, conflicts, doctor,
-  probeCapabilities, selectProvider, parseDimensions, upsertProject, journal,
+  probeCapabilities, selectProvider, expectedIdentity, parseDimensions, upsertProject, journal,
   nodeId, redact, type EmbeddingProvider, type Layer, type EdgeType, type MemoryNode,
   type SearchResult, type Subgraph, type Conflict, type Cluster, type DoctorReport,
   type IngestReport, log,
@@ -22,15 +22,20 @@ import { readRegistry, type RegistryEntry } from '@memory-layer/core';
 
 let cachedProvider: { provider: EmbeddingProvider; capability: unknown } | null = null;
 
-export async function embedder(dimensions: number): Promise<EmbeddingProvider | null> {
+/**
+ * The embedder, or an error naming what is missing.
+ *
+ * It returned null when the model could not be had, and every caller carried on
+ * without it: search ran with the semantic branch reported as degraded, a
+ * written memory was stored without a vector and never found by meaning again.
+ * Each of those was declared somewhere, and none of them was an error -- which
+ * is how a machine without the model looked like a machine where search was
+ * merely not very good. The model is required, so its absence stops the command.
+ */
+export async function embedder(dimensions: number): Promise<EmbeddingProvider> {
   if (cachedProvider) return cachedProvider.provider;
-  try {
-    cachedProvider = await selectProvider(dimensions);
-    return cachedProvider.provider;
-  } catch (err) {
-    log('warn', 'no embedding provider available', err);
-    return null;
-  }
+  cachedProvider = await selectProvider(dimensions);
+  return cachedProvider.provider;
 }
 
 export interface InitOptions {
@@ -40,7 +45,7 @@ export interface InitOptions {
 }
 
 export async function init(
-  options: InitOptions & { scan?: string[]; embed?: boolean; ui?: boolean } = {},
+  options: InitOptions & { scan?: string[]; ui?: boolean } = {},
 ): Promise<{
   storeDir: string;
   report: DoctorReport;
@@ -63,7 +68,8 @@ export async function init(
   // created, the embedding line said `null`, and everything downstream worked
   // except the part that gives this project its name. Failing here costs one
   // command; finding out later costs the store.
-  const choice = await selectProvider(dimensions).catch((err: unknown) => {
+  // `init` may download: on a new machine it is the first command anyone runs.
+  const choice = await selectProvider(dimensions, { allowDownload: true }).catch((err: unknown) => {
     if (!storeExisted) {
       // Only what this call made, and only while it is still empty. A directory
       // with anything in it belongs to somebody else's run.
@@ -78,9 +84,7 @@ export async function init(
       'No store was created. The embedding model is part of the install, not an ' +
       'optional extra: a store built without it holds a project\'s history in a ' +
       'vector space that cannot be compared with the real one.\n' +
-      'Run `node bin/setup.mjs` once with network access, or -- knowing what it ' +
-      'costs -- set MEMORY_LAYER_EMBEDDINGS=hash for the lexical fallback, or ' +
-      'MEMORY_LAYER_EMBEDDINGS=auto to take whichever is available.',
+      'Run `node bin/setup.mjs` with network access, then `init` again.',
     );
   });
   capabilities.embeddings = choice.capability;
@@ -96,7 +100,7 @@ export async function init(
     branch: project.branch,
     lastCommit: project.lastCommit,
     dimensions,
-    embedding: choice ? { model: choice.provider.identity.model, provider: choice.provider.identity.provider } : null,
+    embedding: { model: choice.provider.identity.model, provider: choice.provider.identity.provider },
     capabilities,
   });
 
@@ -122,11 +126,11 @@ export async function init(
     scanned = await ingest(store, options.scan, {
       layer: 'artifact',
       force: false,
-      embedder: options.embed === false ? null : choice?.provider ?? null,
+      embedder: choice.provider,
     });
   }
 
-  const report = await doctor(store, choice?.provider.identity ?? null);
+  const report = await doctor(store, choice.provider.identity);
 
   // Built here for the same reason the scan is: closing this handle does not
   // release the file at once on Windows, so a viewer that opened its own store
@@ -148,12 +152,12 @@ export async function init(
 export async function runIngest(
   targets: string[],
   options: {
-    from?: string; layer?: Layer; force?: boolean; embed?: boolean; maxFileBytes?: number;
+    from?: string; layer?: Layer; force?: boolean; maxFileBytes?: number;
   } = {},
 ): Promise<IngestReport> {
   const store = await writable(options.from);
   try {
-    const provider = options.embed === false ? null : await embedder(store.dimensions);
+    const provider = await embedder(store.dimensions);
     const report = await ingest(store, targets, {
       layer: options.layer ?? 'artifact',
       force: options.force ?? false,
@@ -653,14 +657,11 @@ export async function runWrite(
     // Embed first: the model call is slow, and a write transaction holds the
     // store's exclusive lock for as long as it is open.
     let vector: number[] | null = null;
+    // No vector, no write. A memory stored without one is found by its exact
+    // wording and never by its meaning, and nothing about it says so.
     const provider = await embedder(store.dimensions);
-    if (provider) {
-      try {
-        vector = (await provider.embed([`${node.title}\n${node.body}`]))[0] ?? null;
-      } catch (err) {
-        log('warn', `could not embed ${node.id}`, err);
-      }
-    }
+    vector = (await provider.embed([`${node.title}\n${node.body}`]))[0] ?? null;
+    if (!vector) throw new Error(`The embedding model returned no vector for "${node.title}".`);
 
     // What this source_ref points at, before the write opens a transaction.
     //
@@ -822,12 +823,30 @@ export async function runMerge(options: { from?: string } = {}): Promise<{ merge
   let store: MemoryStore | null = null;
   try {
     store = new MemoryStore(storeDir);
+
+    // A queued write could not reach the store, so it was journalled without a
+    // vector -- and merged that way, it became a memory search finds by exact
+    // wording and never by meaning. Embedded here, before the transaction takes
+    // the lock, and a missing model stops the merge with the journal intact.
+    const provider = await embedder(store.dimensions);
+    const vectors = new Map<string, number[]>();
+    for (const file of files) {
+      for (const entry of journal.readEntries(file)) {
+        if (entry.kind !== 'node' || !entry.node) continue;
+        const [vector] = await provider.embed([`${entry.node.title}\n${entry.node.body}`]);
+        if (!vector) throw new Error(`The embedding model returned no vector for "${entry.node.title}".`);
+        vectors.set(entry.node.id, vector);
+      }
+    }
+
     const merged = await store.transact(async () => {
       let count = 0;
       for (const file of files) {
         for (const entry of journal.readEntries(file)) {
           if (entry.kind === 'node' && entry.node) {
             await store!.upsertNode(entry.node);
+            const vector = vectors.get(entry.node.id);
+            if (vector) await store!.setEmbedding(entry.node.id, vector, provider.identity);
             count += 1;
           } else if (entry.kind === 'edge' && entry.edge) {
             // An edge whose endpoints never merged is dropped with a reason
@@ -1196,8 +1215,9 @@ export async function runDoctor(options: { from?: string } = {}): Promise<Doctor
   const storeDir = storeDirOrThrow(options.from);
   const store = new MemoryStore(storeDir, { readOnly: true });
   try {
-    const provider = await embedder(store.dimensions);
-    const report = await doctor(store, provider?.identity ?? null);
+    // Reported, not loaded: doctor is what somebody runs on the machine where
+    // the model is missing, so it cannot be the thing that needs the model.
+    const report = await doctor(store, expectedIdentity(store.dimensions));
     return { ...report, stale: isStale(storeDir) };
   } finally {
     await store.close();
@@ -1208,8 +1228,9 @@ export async function runDoctor(options: { from?: string } = {}): Promise<Doctor
 export async function runEmbed(options: { from?: string; force?: boolean } = {}): Promise<{ embedded: number; skipped: number }> {
   const store = await writable(options.from);
   try {
-    const provider = await embedder(store.dimensions);
-    if (!provider) throw new Error('No embedding provider available; nothing to embed with.');
+    // Re-embedding is an explicit request for the model, so it may fetch it.
+    cachedProvider ??= await selectProvider(store.dimensions, { allowDownload: true });
+    const provider = cachedProvider.provider;
 
     const identity = provider.identity;
     const nodes = await store.allNodes();
@@ -1236,8 +1257,7 @@ export async function runEmbed(options: { from?: string; force?: boolean } = {})
     // place had `doctor` reporting a hash fallback over vectors from the real
     // model -- the store was fine and the report was wrong.
     const capabilities = { ...store.getMeta().capabilities } as Record<string, unknown>;
-    const choice = await selectProvider(store.dimensions).catch(() => null);
-    if (choice) capabilities.embeddings = choice.capability;
+    capabilities.embeddings = cachedProvider.capability as never;
 
     await store.transact(
       async () => {
