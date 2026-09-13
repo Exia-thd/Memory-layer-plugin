@@ -2,14 +2,14 @@
   "name": "memory-layer-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Project memory layer for Claude \u2014 stores and retrieves why, not what.",
+  "description": "Project memory layer for Claude — stores and retrieves why, not what.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20.11"
   },
   "scripts": {
-    "build": "tsc -b packages/core packages/cli",
+    "build": "tsc -b packages/core packages/cli && node bin/build-stamp.mjs",
     "test": "node --test tests/*.test.js",
     "doctor": "node packages/cli/dist/cli.js doctor",
     "clean": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo"

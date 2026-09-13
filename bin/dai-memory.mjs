@@ -11,16 +11,16 @@
  *
  * The MCP server requires everything, model included: it is how an agent uses
  * the plugin, and an agent cannot act on a half-installed one. Other commands
- * require only the build, so that `doctor` and `--help` still run on exactly the
- * machine where something is missing -- and each command that needs the model
- * refuses on its own, with the same instruction.
+ * require a current build -- not merely an existing one -- so that `doctor` and
+ * `--help` still run on the machine where the model is missing, and each command
+ * that needs the model refuses on its own, with the same instruction.
  *
  * When everything is in place this costs a few stat calls and an import. The CLI
  * is imported rather than spawned, so there is no second Node startup --
  * `process.argv` already holds the arguments it reads.
  */
 import { pathToFileURL } from 'node:url';
-import { CLI_PATH, isBuilt, readiness, setupMessage } from './resolve-cli.mjs';
+import { CLI_PATH, buildState, readiness, setupMessage } from './resolve-cli.mjs';
 
 const command = process.argv[2];
 
@@ -30,9 +30,14 @@ if (command === 'serve') {
     process.stderr.write(`${setupMessage(state)}\n`);
     process.exit(1);
   }
-} else if (!isBuilt()) {
-  process.stderr.write(`${setupMessage(await readiness())}\n`);
-  process.exit(1);
+} else {
+  // A stale build refuses too, and not only for the server: every command it
+  // runs is the previous version's, and none of them would say so.
+  const state = buildState();
+  if (!state.ready) {
+    process.stderr.write(`${setupMessage(state)}\n`);
+    process.exit(1);
+  }
 }
 
 await import(pathToFileURL(CLI_PATH).href);

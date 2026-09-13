@@ -90,6 +90,12 @@ Chừng nào chưa đủ cả ba:
   `setup.mjs` — chúng không bao giờ tự tải model, và không bao giờ chạy khi thiếu;
 - `doctor` vẫn chạy, và báo FAIL ở dòng `embedding model`.
 
+**Đã cài rồi?** Chạy lại `setup.mjs` sẽ bỏ qua phần đã xong — không cài lại,
+không build lại, không tải lại; trên máy đã cài nó chạy vài giây. **Sau khi cập
+nhật plugin**, chạy lại nó: mỗi bản build ghi lại nó được build từ đâu (mã nguồn,
+manifest, lockfile), và một bản build của code cũ sẽ từ chối chạy và báo đã lỗi
+thời, chứ không âm thầm chạy phiên bản trước. Setup cũng thấy điều đó và build lại.
+
 Không có đường lùi. Từng có — đặc trưng băm từ vựng, lúc đầu tự động rồi sau
 thành tuỳ chọn — và cái kho dựng bằng nó vẫn trả lời mọi câu hỏi, chỉ là tệ hơn,
 không phân biệt được với đang chạy tốt, cho tới lúc cả lịch sử dự án đã nằm

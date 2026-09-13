@@ -14,14 +14,37 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildFreshness } from './build-stamp.mjs';
 
 export const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CLI_PATH = path.join(PLUGIN_ROOT, 'packages', 'cli', 'dist', 'cli.js');
 const MODEL_CACHE_MODULE = path.join(PLUGIN_ROOT, 'packages', 'core', 'dist', 'embed', 'model-cache.js');
 
-/** Built means the compiled entry point exists; nothing else is worth guessing about. */
+/** The compiled entry point exists. Necessary, and not enough: see `buildState`. */
 export function isBuilt() {
   return fs.existsSync(CLI_PATH);
+}
+
+/**
+ * Built, and built from the code that is here now.
+ *
+ * Existence alone was the old test, and it passed on a machine that updated the
+ * plugin: the sources were replaced, `dist/` was not, and the plugin ran the
+ * previous version while reporting itself installed.
+ */
+export function buildState() {
+  if (!isBuilt()) {
+    return { ready: false, missing: 'build', problem: 'dai-memory is installed but not built yet.' };
+  }
+  const freshness = buildFreshness(PLUGIN_ROOT);
+  if (!freshness.fresh) {
+    return {
+      ready: false,
+      missing: 'rebuild',
+      problem: `dai-memory's build is out of date: ${freshness.reason}, so it would run the previous version.`,
+    };
+  }
+  return { ready: true, missing: null, problem: null };
 }
 
 /**
@@ -33,9 +56,8 @@ export function isBuilt() {
  * hook asks this on every Read, Grep and Glob.
  */
 export async function readiness() {
-  if (!isBuilt()) {
-    return { ready: false, missing: 'build', problem: 'dai-memory is installed but not built yet.' };
-  }
+  const build = buildState();
+  if (!build.ready) return build;
 
   let embedding;
   try {

@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { PLUGIN_ROOT, CLI_PATH, isBuilt } from './resolve-cli.mjs';
+import { PLUGIN_ROOT, CLI_PATH, buildState } from './resolve-cli.mjs';
 
 /** Pinned, because a workspace resolved by two different pnpm majors is two different trees. */
 const PNPM = 'pnpm@9.15.0';
@@ -55,9 +55,15 @@ process.stdout.write(`Setting up dai-memory in ${PLUGIN_ROOT}\n\n`);
 // state a half-finished setup leaves behind -- so the one command offered to
 // finish the job reported success without doing the part that had failed. It
 // skips the work already done and goes on to the part that is not.
-const rebuild = !isBuilt() || process.argv.includes('--force');
+//
+// "Already built" means built from this code. An updated plugin has new sources
+// and the old `dist/`, and skipping the build there left it running the previous
+// version under a line that said it was installed.
+const before = buildState();
+const rebuild = !before.ready || process.argv.includes('--force');
 
 if (rebuild) {
+  if (before.missing === 'rebuild') process.stdout.write(`${before.problem}\n\n`);
   process.stdout.write('1/3 dependencies\n');
   // Not --frozen-lockfile: this runs on whatever Node and platform the person
   // installed on, and refusing to install because a platform-specific optional
@@ -81,8 +87,11 @@ if (rebuild) {
   // Checked rather than assumed: a build can exit zero and still not produce the
   // file every entry point runs, and finding that out later reads as the plugin
   // being broken rather than as the build being incomplete.
-  if (!isBuilt()) {
-    process.stderr.write(`\nThe build reported success but ${CLI_PATH} is not there.\n`);
+  const after = buildState();
+  if (!after.ready) {
+    process.stderr.write(
+      `\nThe build reported success but is not usable: ${after.problem ?? CLI_PATH}\n`,
+    );
     process.exit(1);
   }
 } else {

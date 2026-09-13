@@ -91,6 +91,13 @@ Until all three are in place:
   they never download the model themselves, and never run without it;
 - `doctor` still runs, and fails on the `embedding model` line.
 
+**Already installed?** Re-running `setup.mjs` skips whatever is done — no
+reinstall, no rebuild, no download; on an installed machine it takes a few
+seconds. **After updating the plugin**, run it again: every build records what
+it was built from (sources, manifests, lockfile), and a build of older code
+refuses to run and says it is out of date rather than silently running the
+previous version. Setup sees the same thing and rebuilds.
+
 There is no fallback. There used to be one — lexical hash features, first
 automatic and then selectable — and a store built with it answered every
 question with something, just worse, indistinguishable from working until a

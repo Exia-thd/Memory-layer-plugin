@@ -39,7 +39,7 @@ test('the entry points name files that a fresh install actually has', () => {
       .filter(Boolean),
   );
 
-  for (const entry of ['bin/dai-memory.mjs', 'bin/resolve-cli.mjs', 'bin/setup.mjs', 'hooks/memory-hook.mjs']) {
+  for (const entry of ['bin/dai-memory.mjs', 'bin/resolve-cli.mjs', 'bin/build-stamp.mjs', 'bin/setup.mjs', 'hooks/memory-hook.mjs']) {
     assert.ok(tracked.has(entry), `${entry} is not committed, so an install would not get it`);
   }
 
